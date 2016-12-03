@@ -11,7 +11,7 @@ int obl_negative_conv[] = {2, -1, -1, -1, 2, -1, -1, -1, 2};
 int** get_convoluter(int type) {
   // Allocating space for our 2d convoluter
   int** conv = (int**)malloc(sizeof(int*) * 3);
-  for(int i = 0; i < 3 - 1; i++) {
+  for(int i = 0; i < 3; i++) {
     *(conv + i) = (int*)malloc(sizeof(int) * 3);
   }
 

@@ -22,12 +22,18 @@ int main() {
   print_matrix_i(example_arr, size);
 
   double** smoother_conv = get_smoother_conv();
-  print_matrix_d(smoother_conv, CONVOLUTION_SIZE);
-
-  int** smooth = convolute_d(example_arr, 5, smoother_conv);
+  int** smooth = convolute_d(example_arr, size, smoother_conv);
   print_matrix_i(smooth, size - 2);
+
+  int** horizontal_convoluter = get_convoluter(1);
+  int** horizonted = convolute_i(smooth, size - 2, horizontal_convoluter);
+  print_matrix_i(horizonted, size - 4);
+
+
   free_matrix_d(smoother_conv, CONVOLUTION_SIZE);
   free_matrix_i(example_arr, size);
+  free_matrix_i(horizontal_convoluter, CONVOLUTION_SIZE);
+  free_matrix_i(horizonted, size - 4);
 
   fclose(file);
   return 0;
