@@ -2,6 +2,7 @@
 #define CONVOLUTION_H_
 
 #define CONVOLUTION_SIZE 3
+#define THRESHOLD 50
 
 /**
  * Allocates a 2D convoluter according to given type.
@@ -22,16 +23,22 @@ int** convolute_i(int** arr, int arr_size, int** convoluter);
 /*
  * Convolutes the point (x, y) of arr with given convoluter.
  */
-void convolute_point_i(int x, int y, int** arr, int** convoluter, int** convoluted_matrix);
+int convolute_point_i(int x, int y, int** arr, int** convoluter);
 
 /*
- * Convolutes given matrix with given double convoluter.
+ * Smoothens the given matrix.
  */
-int** convolute_d(int** arr, int arr_size, double** convoluter);
+int** convolute_smoothen(int** arr, int arr_size);
+
+/*
+ * Using 4 generic convoluters, decides a value of either 0 or 255
+ * based on a threshold.
+ */
+int** convolute_threshold(int** arr, int arr_size);
 
 /*
  * Convolutes the point (x, y) of arr with given double convoluter.
  */
-void convolute_point_d(int x, int y, int** arr, double** convoluter, int** convoluted_matrix);
+void smoothen_point(int x, int y, int** arr, double** convoluter, int** convoluted_matrix);
 
 #endif // CONVOLUTION_H_

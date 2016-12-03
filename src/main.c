@@ -3,37 +3,34 @@
 #include "matrix.h"
 #include "convolution.h"
 
+const int image_size = 200;
+
 int main() {
   printf("Hello!\n");
-  int size = 5;
-  int** example_arr = (int**)malloc(sizeof(int*) * size);
-  for(int i = 0; i < size; i++) {
-    *(example_arr + i) = (int*)malloc(sizeof(int) * size);
+  int smooth_image_size = image_size - 2;
+  int binary_image_size = smooth_image_size - 2;
+
+  int** image = (int**)malloc(sizeof(int*) * image_size);
+  for(int i = 0; i < image_size; i++) {
+    *(image + i) = (int*)malloc(sizeof(int) * image_size);
   }
 
-  FILE* file = fopen("input2.txt", "r");
-  for(int i = 0; i < size; i++) {
-    for(int j = 0; j < size; j++) {
+  FILE* file = fopen("input.txt", "r");
+  for(int i = 0; i < image_size; i++) {
+    for(int j = 0; j < image_size; j++) {
       int val;
       fscanf(file, "%d", &val);
-      *(*(example_arr + j) + i) = val;
+      *(*(image + j) + i) = val;
     }
   }
-  print_matrix_i(example_arr, size);
+  int** smooth_image = convolute_smoothen(image, image_size);
+  int** binary_image = convolute_threshold(smooth_image, smooth_image_size);
+  print_matrix_i(image, image_size, "original.txt");
+  print_matrix_i(smooth_image, smooth_image_size, "smooth.txt");
+  print_matrix_i(binary_image, binary_image_size, "binary.txt");
 
-  double** smoother_conv = get_smoother_conv();
-  int** smooth = convolute_d(example_arr, size, smoother_conv);
-  print_matrix_i(smooth, size - 2);
-
-  int** horizontal_convoluter = get_convoluter(1);
-  int** horizonted = convolute_i(smooth, size - 2, horizontal_convoluter);
-  print_matrix_i(horizonted, size - 4);
-
-
-  free_matrix_d(smoother_conv, CONVOLUTION_SIZE);
-  free_matrix_i(example_arr, size);
-  free_matrix_i(horizontal_convoluter, CONVOLUTION_SIZE);
-  free_matrix_i(horizonted, size - 4);
+  free_matrix_i(image, image_size);
+  free_matrix_i(smooth_image, smooth_image_size);
 
   fclose(file);
   return 0;

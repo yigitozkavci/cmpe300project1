@@ -18,8 +18,10 @@ isTxtToImg = 1;
 #########################
 # Takes "input.txt" and shows the image representation
 # of the 2D array
+files = ['original', 'smooth', 'binary']
 if isTxtToImg:
-	data = np.loadtxt("input2.txt")
+    for file in files:
+	data = np.loadtxt(file + '.txt')
 	svimg = Image.fromarray(data.astype('uint8'))
 	svimg.show()
 else:

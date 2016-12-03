@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include "matrix.h"
+#include <stdbool.h>
 
 int horizontal_conv[] = {-1, -1, -1, 2, 2, 2, -1, -1, -1};
 int vertical_conv[] = {-1, 2, -1, -1, 2, -1, -1, 2, -1};
@@ -58,24 +60,46 @@ double** get_smoother_conv() {
   return smoother_conv;
 }
 
-int** convolute_i(int** arr, int arr_size, int** convoluter) {
+int** convolute_threshold(int** arr, int arr_size) {
   // Allocating space
   int** convoluted_matrix = (int**)malloc(sizeof(int*) * (arr_size - 1));
   for(int i = 0; i < arr_size - 1; i++) {
     *(convoluted_matrix + i) = (int*)malloc(sizeof(int) * (arr_size - 1));
   }
 
-  // Convoluting around each point
+  int*** generic_convoluter = (int***)malloc(sizeof(int**) * 4);
+  for(int i = 1; i <= 4; i++) {
+    *generic_convoluter = get_convoluter(i);
+    generic_convoluter++;
+  }
+  generic_convoluter -= 4;
+
+  int convolution_value; // Instant convolution value which will be compared to threshold
+  bool passed_threshold; // Determines whether a convolution value passed threshold
+  int binary_value;      // Binary value to put in convoluted matrix
+
   for(int i = 1; i < arr_size - 1; i++) {
     for(int j = 1; j < arr_size - 1; j++) {
-      convolute_point_i(i, j, arr, convoluter, convoluted_matrix);
+      passed_threshold = false;
+      for(int k = 1; k <= 4; k++) {
+        convolution_value = convolute_point_i(i, j, arr, *(generic_convoluter + k - 1));
+        /* printf("Convolution value: %d\n", convolution_value); */
+        if(convolution_value > THRESHOLD) {
+          passed_threshold = true;
+        }
+      }
+      if(passed_threshold) {
+        binary_value = 255;
+      } else {
+        binary_value = 0;
+      }
+      *(*(convoluted_matrix + j - 1) + i - 1) = binary_value;
     }
   }
-
   return convoluted_matrix;
 }
 
-void convolute_point_i(int x, int y, int** arr, int** convoluter, int** convoluted_matrix) {
+int convolute_point_i(int x, int y, int** arr, int** convoluter) {
   int total = 0;        // Total value of convoluting process
   int convoluter_x = 0; // X position of convoluter matrix
   int convoluter_y = 0; // Y position of convoluter matrix
@@ -90,30 +114,29 @@ void convolute_point_i(int x, int y, int** arr, int** convoluter, int** convolut
     convoluter_y = 0;
   }
 
-  // Becaue we are creating a smaller matrix for resulting convoluted matrix,
-  // we are doing it by shifting array indexes by 1.
-  // Ex. For a matrix of size 200x200, after convolution we will have 198x198
-  *(*(convoluted_matrix + y - 1) + x - 1) = total;
+  return total;
 }
 
-int** convolute_d(int** arr, int arr_size, double** convoluter) {
+int** convolute_smoothen(int** arr, int arr_size) {
   // Allocating space
   int** convoluted_matrix = (int**)malloc(sizeof(int*) * (arr_size - 1));
   for(int i = 0; i < arr_size - 1; i++) {
     *(convoluted_matrix + i) = (int*)malloc(sizeof(int) * (arr_size - 1));
   }
 
+  double** smoother_conv = get_smoother_conv();
   // Convoluting around each point
   for(int i = 1; i < arr_size - 1; i++) {
     for(int j = 1; j < arr_size - 1; j++) {
-      convolute_point_d(i, j, arr, convoluter, convoluted_matrix);
+      smoothen_point(i, j, arr, smoother_conv, convoluted_matrix);
     }
   }
+  free_matrix_d(smoother_conv, CONVOLUTION_SIZE);
 
   return convoluted_matrix;
 }
 
-void convolute_point_d(int x, int y, int** arr, double** convoluter, int** convoluted_matrix) {
+void smoothen_point(int x, int y, int** arr, double** convoluter, int** convoluted_matrix) {
   double total = 0;     // Total value of convoluting process
   int convoluter_x = 0; // X position of convoluter matrix 
   int convoluter_y = 0; // Y position of convoluter matrix
