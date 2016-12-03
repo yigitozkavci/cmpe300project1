@@ -3,6 +3,12 @@
 
 #define CONVOLUTION_SIZE 3
 
+/**
+ * Allocates a 2D convoluter according to given type.
+ * Convoluter definitions are hardcoded in convolution.c file.
+ */
+int** get_convoluter(int type);
+
 /*
  * Generates a smoother convoluter. It's a 3x3 matrix with all values 1/9.
  */
@@ -11,12 +17,12 @@ double** get_smoother_conv();
 /*
  * Convolutes given matrix with given integer convoluter.
  */
-void convolute_i(int** arr, int arr_size, int** convoluter);
+int** convolute_i(int** arr, int arr_size, int** convoluter);
 
 /*
  * Convolutes the point (x, y) of arr with given convoluter.
  */
-void convolute_point_i(int x, int y, int** arr, int** convoluter);
+void convolute_point_i(int x, int y, int** arr, int** convoluter, int** convoluted_matrix);
 
 /*
  * Convolutes given matrix with given double convoluter.

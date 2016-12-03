@@ -24,8 +24,8 @@ int main() {
   double** smoother_conv = get_smoother_conv();
   print_matrix_d(smoother_conv, CONVOLUTION_SIZE);
 
-  int** new = convolute_d(example_arr, 5, smoother_conv);
-  print_matrix_i(new, size - 2);
+  int** smooth = convolute_d(example_arr, 5, smoother_conv);
+  print_matrix_i(smooth, size - 2);
   free_matrix_d(smoother_conv, CONVOLUTION_SIZE);
   free_matrix_i(example_arr, size);
 
