@@ -1,0 +1,4 @@
+#!/bin/sh
+proc_count=$1
+mpicc -g prog.c -o prog
+mpiexec -n ${proc_count:=2} ./prog
