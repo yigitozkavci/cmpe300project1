@@ -58,24 +58,19 @@ void convolute_point_d(int x, int y, int** arr, double** convoluter, int** convo
   double total = 0;
   int convoluter_x = 0;
   int convoluter_y = 0;
-  printf("Convoluting point: %d at (%d, %d)\n", *(*(arr + y) + x), x, y);
   for(int i = x-1; i <= x+1; i++, convoluter_x++) {
     for(int j = y-1; j <= y+1; j++, convoluter_y++) {
       int arr_val = *(*(arr + j) + i);
       double convoluter_val = *(*(convoluter + convoluter_y) + convoluter_x);
-      printf("[!] Arr val: %d\n", arr_val);
-      printf("[!] Convoluter val: %f\n", convoluter_val);
       total += arr_val * convoluter_val;
     }
     convoluter_y = 0;
   }
   int result;
-  printf("Total: %f\n", total);
   if(fabs(total - round(total)) < 0.001) {
     result = (int) round(total);
   } else {
     result = (int) total;
   }
-  printf("Chosen: %d\n", result);
   *(*(convoluted_matrix + y - 1) + x - 1) = result;
 }
