@@ -1,4 +1,4 @@
 #!/bin/sh
 proc_count=$1
-mpicc -g prog.c -o prog
-mpiexec -n ${proc_count:=2} ./prog
+mpicc -g master_slave.c -o master_slave
+mpiexec -n ${proc_count:=2} ./master_slave

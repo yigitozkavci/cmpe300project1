@@ -2,7 +2,7 @@
 #define CONVOLUTION_H_
 
 #define CONVOLUTION_SIZE 3
-#define THRESHOLD 50
+#define THRESHOLD 25
 
 /**
  * Allocates a 2D convoluter according to given type.

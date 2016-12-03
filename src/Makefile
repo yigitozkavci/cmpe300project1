@@ -1,5 +1,5 @@
-CC = gcc
-FLAGS = -g -Wall
+CC = mpicc
+FLAGS = -g
 all: main.o
 	$(CC) $(FLAGS) -o main main.o convolution.o matrix.o
 
