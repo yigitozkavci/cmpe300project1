@@ -7,6 +7,7 @@
 
 from PIL import Image
 import numpy as np
+import os.path
 
 # Set 1 for converting text to image
 # Set 0 for converting image to 2D array representation 
@@ -21,6 +22,8 @@ isTxtToImg = 1;
 files = ['original', 'smooth', 'binary']
 if isTxtToImg:
     for file in files:
+        if not os.path.isfile(file + '.txt'):
+            continue 
 	data = np.loadtxt(file + '.txt')
 	svimg = Image.fromarray(data.astype('uint8'))
 	svimg.show()

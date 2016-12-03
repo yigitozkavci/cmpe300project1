@@ -25,8 +25,6 @@ int main() {
   }
   int** smooth_image = convolute_smoothen(image, image_size);
   int** binary_image = convolute_threshold(smooth_image, smooth_image_size);
-  print_matrix_i(image, image_size, "original.txt");
-  print_matrix_i(smooth_image, smooth_image_size, "smooth.txt");
   print_matrix_i(binary_image, binary_image_size, "binary.txt");
 
   free_matrix_i(image, image_size);
