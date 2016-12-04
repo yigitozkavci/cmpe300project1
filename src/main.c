@@ -45,16 +45,16 @@ int* get_slice(int** image, int image_size, int image_slice_size, int index) {
   int* slice = (int*)malloc(sizeof(int) * image_slice_size * image_size);
   for(int row = index * image_slice_size; row < (index + 1) * image_slice_size; row++) {
     for(int col = 0; col < image_size; col++) {
-      printf("addr: %d, col: %d, val: %d\n", col + index * image_size, col, *(*(image + col) + row));
-      *(slice + col + image_size * index) = *(*(image + col) + row);
+      /* printf("addr: %d, val: %d\n", col + row * image_size - index*image_size*image_slice_size, *(*(image + col) + row)); */
+      *(slice + col + row * image_size - index*image_size*image_slice_size) = *(*(image + col) + row);
     }
   }
-  printf("Image Size: %d\nImage Slice Size: %d\nIndex: %d\n", image_size, image_slice_size, index);
-  printf("Image: \n");
-  print_matrix_i(image, image_size, "print");
-  printf("Slice: \n");
-  print_arr(slice, image_slice_size * image_size);
-  printf("\n\n");
+  /* printf("Image Size: %d\nImage Slice Size: %d\nIndex: %d\n", image_size, image_slice_size, index); */
+  /* printf("Image: \n"); */
+  /* print_matrix_i(image, image_size, "print"); */
+  /* printf("Slice: \n"); */
+  /* print_arr(slice, image_slice_size * image_size); */
+  /* printf("\n\n"); */
   return slice;
 }
 
