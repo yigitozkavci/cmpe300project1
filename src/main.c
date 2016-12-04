@@ -3,11 +3,15 @@
 #include "matrix.h"
 #include "convolution.h"
 #include "mpi.h"
+#include <stdbool.h>
 
 #define DIETAG 1
 #define SLICE_TAG 2
 #define SLICE_SIZE_TAG 3
 #define SLICE_TYPE_TAG 4
+#define DEMAND_DATA_FROM_UPPER_SLICE_TAG 5
+#define DEMAND_DATA_FROM_LOWER_SLICE_TAG 6
+#define POINT_DATA_TAG 7
 #define SLICE_TYPE_TOP 1
 #define SLICE_TYPE_MIDDLE 2
 #define SLICE_TYPE_BOTTOM 3
@@ -39,6 +43,38 @@ int** image_from_input() {
   }
   fclose(file);
   return image;
+}
+
+/*
+ * Demands data of three points from either top or bottom slice.
+ */
+void demand_point_data(int* curr_x, int rank, int* received_vals, char type, MPI_Status status) {
+  printf("[%d] Demanding data for index %d as process \n", rank, *curr_x);
+  int send_tag;
+  int remote_rank;
+  if(type == 'u') {
+    send_tag = DEMAND_DATA_FROM_UPPER_SLICE_TAG;
+    remote_rank = rank - 1;
+  } else if(type == 'l') {
+    send_tag = DEMAND_DATA_FROM_LOWER_SLICE_TAG;
+    remote_rank = rank + 1;
+  }
+  printf("Sending message\n");
+  MPI_Sendrecv(
+    curr_x,            // initial address of send buffer (choice)
+    1,                  // number of elements in send buffer (integer)
+    MPI_INT,            // type of elements in send buffer (handle)
+    remote_rank,           // rank of destination (integer)
+    send_tag, // send tag (integer)
+    received_vals,      // address of receive buffer
+    3,                  // number of elements in receive buffer (integer)
+    MPI_INT,            // type of elements in receive buffer (handle)
+    remote_rank,           // rank of source (integer)
+    MPI_ANY_TAG,       // receive tag (integer)
+    MPI_COMM_WORLD,     // communicator
+    &status             // status
+  );
+  printf("Received message!\n");
 }
 
 /**
@@ -75,7 +111,8 @@ void master() {
     int* image_slice = get_slice(image, image_size, image_slice_size/image_size, rank - 1);
     print_arr(image_slice, image_slice_size);
     MPI_Send(&image_slice_size, 1, MPI_INT, rank, SLICE_SIZE_TAG, MPI_COMM_WORLD);
-    MPI_Send(image_slice, image_slice_size, MPI_INT, rank, SLICE_TAG, MPI_COMM_WORLD);
+    *(image_slice + image_slice_size) = image_size;
+    MPI_Send(image_slice, image_slice_size + 1, MPI_INT, rank, SLICE_TAG, MPI_COMM_WORLD);
     if(rank == 1) {
       image_slice_type = SLICE_TYPE_TOP;
     } else if(rank == proc_size - 1) {
@@ -85,39 +122,134 @@ void master() {
     }
     MPI_Send(&image_slice_type, 1, MPI_INT, rank, SLICE_TYPE_TAG, MPI_COMM_WORLD);
   }
+}
 
-  /* int** smooth_image = convolute_smoothen(image, image_size); */
-  /* int** binary_image = convolute_threshold(smooth_image, smooth_image_size); */
-  /* print_matrix_i(binary_image, binary_image_size, "binary.txt"); */
+int** deserialize_slice(int* slice, int row_count, int col_count) {
+  // Allocating space for new slice
+  int** new_slice = (int**)malloc(col_count * sizeof(int*));
+  for(int col = 0; col < col_count; col++) {
+    *(new_slice + col) = (int*)malloc(row_count * sizeof(int));
+  }
 
-  free_matrix_i(image, image_size);
-  /* free_matrix_i(smooth_image, smooth_image_size); */
+  // Filling new slice matrix
+  for(int row = 0; row < row_count; row++) {
+    for(int col = 0; col < col_count; col++) {
+      *(*(new_slice + col) + row) = *(slice + row * col_count + col);
+    }
+  }
+
+  free(slice);
+  return new_slice;
 }
 
 void slave() {
   MPI_Status status;
-  int work, rank, slice_size;
-  int* slice;
-  int slice_type;
+  int work, rank, slice_size, slice_type, row_count, col_count;
+  int* slice;         // Slice that this slave is going to work on. It's an array.
+  int** slice_matrix; // We are receiving slice as an array but then deserializing it to matrix.
 
+  // Setting rank
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+  // Receiving slice size
+  MPI_Recv(&slice_size, 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+
+  // Receiving slice on our allocated slice space.
+  //
+  // Assume a 6x6 image seperated into 3 slices:
+  // 1 slice has 12 points and we are sending 13 integers being first 12 is
+  // slice data, and 13th is column count which is 6 since image is 6x6.
+  slice = (int*) malloc((slice_size + 1) * sizeof(int)); // Allocating space for slave's slice
+  MPI_Recv(slice, slice_size + 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+  col_count = *(slice + slice_size);
+  row_count = slice_size/col_count; 
+
+  // Receiving type of slice which indicates whether it's at the top, bottom or middle
+  MPI_Recv(&slice_type, 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+  /* printf("[%d] My Type: %d\n", rank, slice_type); */
+
+  slice_matrix = deserialize_slice(slice, row_count, col_count);
+  /* free_matrix_i(slice_matrix, col_count); */
+
+  // Starting smoothing process. After smoothing each point, slave is checking whether
+  // there is a message from other slaves
+  int operation_count;
+  int start_x, start_y;                   // Starting point of slice processing
+  int end_x, end_y;                       // Ending point of slice processing (exclusive)
+
+  // Setting starting and ending points based on slice types
+  start_x = 1;           // Horizontal starting and ending points are the
+  end_x = col_count - 1; // same for every slice
+  if(slice_type == SLICE_TYPE_MIDDLE) {
+    start_y = 0;
+    end_y = row_count;
+  } else if(slice_type == SLICE_TYPE_TOP) {
+    start_y = 1;
+    end_y = row_count;
+  } else if(slice_type == SLICE_TYPE_BOTTOM) {
+    start_y = 0;
+    end_y = row_count - 1;
+  } else {
+    printf("[!] Wrong slice type: %d\n", slice_type);
+    exit(0);
+  }
+
+  // Starting smoothing job
+  int curr_x = start_x, curr_y = start_y; // Current point of slice processing
+  bool job_finished = false;
+  int message_exists;
+  printf("[%d] Slice I am working on: \n", rank);
+  printf("%d, %d\n", row_count, col_count);
+  print_matrix_i(slice_matrix, row_count, col_count, "print");
   for(;;) {
-    MPI_Recv(&slice_size, 1, MPI_INT, 0, SLICE_SIZE_TAG, MPI_COMM_WORLD, &status);
-    slice = (int*) malloc(slice_size * sizeof(int));
-    MPI_Recv(slice, slice_size, MPI_INT, 0, SLICE_TAG, MPI_COMM_WORLD, &status);
-    printf("[%d] My Slice: \n", rank);
-    print_arr(slice, slice_size);
-    MPI_Recv(&slice_type, 1, MPI_INT, 0, SLICE_TYPE_TAG, MPI_COMM_WORLD, &status);
-    printf("[%d] My Type: %d\n", rank, slice_type);
-    /* if(status.MPI_TAG == DIETAG) { */
-    /*   return; */
-    /* } else if(status.MPI_TAG == SLICE_SIZE_TAG) { */
-    /*   slice_size = work; */
-    /*   printf("[%d] Slice size is: %d\n", rank, slice_size); */
-    /* } else if(status.MPI_TAG == SLICE_TAG) { */
-    /*   slice = &work; */
-    /*   print_arr(slice, slice_size); */
-    /* } */
+    MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
+    if(!message_exists && !job_finished) { // Do your own job
+      if(curr_x == end_x) { // Boundary conditions where we need to rearrange position
+        if(curr_y == end_y) {
+          job_finished = true;
+        } else {
+          curr_x = 0;
+          curr_y++;
+        }
+      } else { // We can process (curr_x, curr_y) without hesitation now
+        // Check if we need to send a message for boundary points
+        if(slice_type == SLICE_TYPE_TOP) {
+          if(curr_y == end_y - 1) {
+            int received_vals;
+            demand_point_data(&curr_x, rank, &received_vals, 'l', status);
+            printf("[%d] Received these points: \n", rank);
+            print_arr(&received_vals, 3);
+          }
+          printf("wee!\n");
+          curr_x++;
+        } else if(slice_type == SLICE_TYPE_MIDDLE) {
+
+        } else if(slice_type == SLICE_TYPE_BOTTOM) {
+
+        }
+      }
+    } else { // Send information according to the message
+      int x_index;
+      int demander_source;
+      MPI_Recv(&x_index, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+      demander_source = status.MPI_SOURCE;
+      printf("[%d] Source %d wants my x_index:%d data\n", rank, demander_source, x_index);
+      if(status.MPI_TAG == DEMAND_DATA_FROM_UPPER_SLICE_TAG) {
+        ;
+      } else if(status.MPI_TAG == DEMAND_DATA_FROM_LOWER_SLICE_TAG) {
+        int *points = malloc(sizeof(int) * 3); 
+        for(int i = x_index - 1; i <= x_index + 1; i++) {
+          printf("Setting point value: %d\n", *(*(slice_matrix + i) + 0));
+          *(points + i - x_index + 1) = *(*(slice_matrix + i) + 0);
+        }
+        printf("Sent these points: \n");
+        printf("%d %d %d\n", *points, *(points + 1), *(points + 2));
+        MPI_Send(points, 3, MPI_INT, demander_source, POINT_DATA_TAG, MPI_COMM_WORLD);
+      } else {
+        printf("[!] Wrong tag: %d\n", status.MPI_TAG);
+        exit(0);
+      }
+    }
   }
 }
 

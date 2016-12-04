@@ -4,7 +4,7 @@
 /**
  * Prints the given integer matrix.
  */
-void print_matrix_i(int**, int, char*); 
+void print_matrix_i(int**, int, int, char*); 
 
 /**
  * Prints the given double matrix.
