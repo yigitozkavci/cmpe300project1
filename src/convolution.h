@@ -36,9 +36,4 @@ int** convolute_smoothen(int** arr, int arr_size);
  */
 int** convolute_threshold(int** arr, int arr_size);
 
-/*
- * Convolutes the point (x, y) of arr with given double convoluter.
- */
-void smoothen_point(int x, int y, int** arr, double** convoluter, int** convoluted_matrix);
-
 #endif // CONVOLUTION_H_

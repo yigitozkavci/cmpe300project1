@@ -135,32 +135,3 @@ int** convolute_smoothen(int** arr, int arr_size) {
 
   return convoluted_matrix;
 }
-
-void smoothen_point(int x, int y, int** arr, double** convoluter, int** convoluted_matrix) {
-  double total = 0;     // Total value of convoluting process
-  int convoluter_x = 0; // X position of convoluter matrix 
-  int convoluter_y = 0; // Y position of convoluter matrix
-
-  // Looping around (x, y) of arr and adding multiplication results to total
-  for(int i = x-1; i <= x+1; i++, convoluter_x++) {
-    for(int j = y-1; j <= y+1; j++, convoluter_y++) {
-      int arr_val = *(*(arr + j) + i);
-      double convoluter_val = *(*(convoluter + convoluter_y) + convoluter_x);
-      total += arr_val * convoluter_val;
-    }
-    convoluter_y = 0;
-  }
-
-  // Since this is convolution uses a double convoluter, we are casting result to int
-  int result;
-  if(fabs(total - round(total)) < 0.001) {
-    result = (int) round(total);
-  } else {
-    result = (int) total;
-  }
-
-  // Becaue we are creating a smaller matrix for resulting convoluted matrix,
-  // we are doing it by shifting array indexes by 1.
-  // Ex. For a matrix of size 200x200, after convolution we will have 198x198
-  *(*(convoluted_matrix + y - 1) + x - 1) = result;
-}
