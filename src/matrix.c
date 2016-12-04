@@ -1,6 +1,7 @@
 #include "matrix.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 void print_matrix_d(double** matrix, int size) {
   for(int i = 0; i < size; i++) {
@@ -13,10 +14,12 @@ void print_matrix_d(double** matrix, int size) {
 }
 
 void print_matrix_i(int** matrix, int size, char* filename) {
-  FILE *f = fopen(filename, "w");
+  FILE *f;
+  if(!strncmp(filename, "print", 5))
+    f = fopen(filename, "w");
   for(int i = 0; i < size; i++) {
     for(int j = 0; j < size; j++) {
-      if(filename == "print") {
+      if(strncmp(filename, "print", 5)) {
         if(j != 0) printf(" ");
         printf("%d", *(*(matrix + j) + i));
       } else {
@@ -24,7 +27,7 @@ void print_matrix_i(int** matrix, int size, char* filename) {
         fprintf(f, "%d", *(*(matrix + j) + i));
       }
     }
-    if(filename == "print") {
+    if(strncmp(filename, "print", 5)) {
       printf("\n");
     } else {
       fprintf(f, "\n");

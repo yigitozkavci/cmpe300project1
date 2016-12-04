@@ -7,6 +7,10 @@
 #define DIETAG 1
 #define SLICE_TAG 2
 #define SLICE_SIZE_TAG 3
+#define SLICE_TYPE_TAG 4
+#define SLICE_TYPE_TOP 1
+#define SLICE_TYPE_MIDDLE 2
+#define SLICE_TYPE_BOTTOM 3
 
 const int image_size = 6;
 const int smooth_image_size = image_size - 2;
@@ -65,31 +69,46 @@ void master() {
 
   int** image = image_from_input();
   int image_slice_size = image_size * image_size / (proc_size - 1);
+  int image_slice_type;
 
   for(rank = 1; rank < proc_size; rank++) {
     int* image_slice = get_slice(image, image_size, image_slice_size/image_size, rank - 1);
-    /* print_arr(image_slice, image_slice_size); */
+    print_arr(image_slice, image_slice_size);
     MPI_Send(&image_slice_size, 1, MPI_INT, rank, SLICE_SIZE_TAG, MPI_COMM_WORLD);
     MPI_Send(image_slice, image_slice_size, MPI_INT, rank, SLICE_TAG, MPI_COMM_WORLD);
+    if(rank == 1) {
+      image_slice_type = SLICE_TYPE_TOP;
+    } else if(rank == proc_size - 1) {
+      image_slice_type = SLICE_TYPE_BOTTOM;
+    } else {
+      image_slice_type = SLICE_TYPE_MIDDLE;
+    }
+    MPI_Send(&image_slice_type, 1, MPI_INT, rank, SLICE_TYPE_TAG, MPI_COMM_WORLD);
   }
 
-  int** smooth_image = convolute_smoothen(image, image_size);
-  int** binary_image = convolute_threshold(smooth_image, smooth_image_size);
-  print_matrix_i(binary_image, binary_image_size, "binary.txt");
+  /* int** smooth_image = convolute_smoothen(image, image_size); */
+  /* int** binary_image = convolute_threshold(smooth_image, smooth_image_size); */
+  /* print_matrix_i(binary_image, binary_image_size, "binary.txt"); */
 
   free_matrix_i(image, image_size);
-  free_matrix_i(smooth_image, smooth_image_size);
+  /* free_matrix_i(smooth_image, smooth_image_size); */
 }
 
 void slave() {
   MPI_Status status;
   int work, rank, slice_size;
   int* slice;
+  int slice_type;
 
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   for(;;) {
-    MPI_Recv(&slice_size, 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-    MPI_Recv(slice, slice_size, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+    MPI_Recv(&slice_size, 1, MPI_INT, 0, SLICE_SIZE_TAG, MPI_COMM_WORLD, &status);
+    slice = (int*) malloc(slice_size * sizeof(int));
+    MPI_Recv(slice, slice_size, MPI_INT, 0, SLICE_TAG, MPI_COMM_WORLD, &status);
+    printf("[%d] My Slice: \n", rank);
+    print_arr(slice, slice_size);
+    MPI_Recv(&slice_type, 1, MPI_INT, 0, SLICE_TYPE_TAG, MPI_COMM_WORLD, &status);
+    printf("[%d] My Type: %d\n", rank, slice_type);
     /* if(status.MPI_TAG == DIETAG) { */
     /*   return; */
     /* } else if(status.MPI_TAG == SLICE_SIZE_TAG) { */
