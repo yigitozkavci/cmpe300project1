@@ -4,6 +4,7 @@
 #include "convolution.h"
 #include "mpi.h"
 #include <stdbool.h>
+#include "string.h"
 
 #define DIETAG 1
 #define SLICE_TAG 2
@@ -12,6 +13,10 @@
 #define DEMAND_DATA_FROM_UPPER_SLICE_TAG 5
 #define DEMAND_DATA_FROM_LOWER_SLICE_TAG 6
 #define POINT_DATA_TAG 7
+#define DEBUG_MESSAGE_1_TAG 8
+#define DEBUG_MESSAGE_2_TAG 9
+#define DEBUG_MESSAGE_3_TAG 10
+#define DEBUG_MESSAGE_FOLLOWUP_TAG 11
 #define SLICE_TYPE_TOP 1
 #define SLICE_TYPE_MIDDLE 2
 #define SLICE_TYPE_BOTTOM 3
@@ -20,13 +25,28 @@ const int image_size = 6;
 const int smooth_image_size = image_size - 2;
 const int binary_image_size = smooth_image_size - 2;
 
-void print_arr(int* arr, int size) {
-  for(int i = 0; i < size; i++) {
-    if(i != 0) printf(" ");
-    printf("%d", *(arr + i));
-  }
-  printf("\n");
+void debug_1(char *message, int *rank) {
+  MPI_Send(message, strlen(message), MPI_CHAR, 0, DEBUG_MESSAGE_1_TAG, MPI_COMM_WORLD);
 }
+
+void debug_2(char *message, int *arg1, int *rank) {
+  MPI_Send(message, strlen(message), MPI_CHAR, 0, DEBUG_MESSAGE_2_TAG, MPI_COMM_WORLD);
+  MPI_Send(arg1, 1, MPI_INT, 0, DEBUG_MESSAGE_FOLLOWUP_TAG, MPI_COMM_WORLD);
+}
+
+void debug_3(char *message, int *arg1, int *arg2, int *rank) {
+  MPI_Send(message, strlen(message), MPI_CHAR, 0, DEBUG_MESSAGE_3_TAG, MPI_COMM_WORLD);
+  MPI_Send(arg1, 1, MPI_INT, 0, DEBUG_MESSAGE_FOLLOWUP_TAG, MPI_COMM_WORLD);
+  MPI_Send(arg2, 1, MPI_INT, 0, DEBUG_MESSAGE_FOLLOWUP_TAG, MPI_COMM_WORLD);
+}
+
+/* void print_arr(int* arr, int size) { */
+/*   for(int i = 0; i < size; i++) { */
+/*     if(i != 0) printf(" "); */
+/*     printf("%d", *(arr + i)); */
+/*   } */
+/*   printf("\n"); */
+/* } */
 
 int** image_from_input() {
   int** image = (int**)malloc(sizeof(int*) * image_size);
@@ -49,7 +69,6 @@ int** image_from_input() {
  * Demands data of three points from either top or bottom slice.
  */
 void demand_point_data(int* curr_x, int rank, int* received_vals, char type, MPI_Status status) {
-  printf("[%d] Demanding data for index %d as process \n", rank, *curr_x);
   int send_tag;
   int remote_rank;
   if(type == 'u') {
@@ -59,42 +78,53 @@ void demand_point_data(int* curr_x, int rank, int* received_vals, char type, MPI
     send_tag = DEMAND_DATA_FROM_LOWER_SLICE_TAG;
     remote_rank = rank + 1;
   }
-  printf("Sending message\n");
-  MPI_Sendrecv(
-    curr_x,            // initial address of send buffer (choice)
-    1,                  // number of elements in send buffer (integer)
-    MPI_INT,            // type of elements in send buffer (handle)
-    remote_rank,           // rank of destination (integer)
-    send_tag, // send tag (integer)
-    received_vals,      // address of receive buffer
-    3,                  // number of elements in receive buffer (integer)
-    MPI_INT,            // type of elements in receive buffer (handle)
-    remote_rank,           // rank of source (integer)
-    MPI_ANY_TAG,       // receive tag (integer)
-    MPI_COMM_WORLD,     // communicator
-    &status             // status
+  debug_3("Demanding data for index %d from process %d", curr_x, &remote_rank, &rank);
+  /* MPI_Sendrecv( */
+  /*   curr_x,            // initial address of send buffer (choice) */
+  /*   1,                  // number of elements in send buffer (integer) */
+  /*   MPI_INT,            // type of elements in send buffer (handle) */
+  /*   remote_rank,           // rank of destination (integer) */
+  /*   send_tag, // send tag (integer) */
+  /*   received_vals,      // address of receive buffer */
+  /*   3,                  // number of elements in receive buffer (integer) */
+  /*   MPI_INT,            // type of elements in receive buffer (handle) */
+  /*   remote_rank,           // rank of source (integer) */
+  /*   MPI_ANY_TAG,       // receive tag (integer) */
+  /*   MPI_COMM_WORLD,     // communicator */
+  /*   &status             // status */
+  /* ); */
+  MPI_Send(
+    curr_x,         // initial address of send buffer (choice)
+    1,              // number of elements in send buffer (integer)
+    MPI_INT,        // type of elements in send buffer (handle)
+    remote_rank,    // rank of destination (integer)
+    send_tag,       // send tag (integer)
+    MPI_COMM_WORLD  // communicator
   );
-  printf("Received message!\n");
+  MPI_Recv(
+    received_vals,  // address of receive buffer
+    3,              // number of elements in receive buffer (integer)
+    MPI_INT,        // type of elements in receive buffer (handle)
+    remote_rank,    // rank of source (integer)
+    MPI_ANY_TAG,    // receive tag (integer)
+    MPI_COMM_WORLD, // communicator
+    &status         // status
+  );
+  debug_3("Received these data for index %d from process %d", curr_x, &remote_rank, &rank);
+  /* print_arr(received_vals, 3); */
 }
 
 /**
- * Splits image into given sizes and returns the slice in given index.
+ * Splits image into given sizes and returns serialized version of the slice in given index.
  */
 int* get_slice(int** image, int image_size, int image_slice_size, int index) {
   // We are keeping slice as contiguous mamory because it'll be passed via MPI
   int* slice = (int*)malloc(sizeof(int) * image_slice_size * image_size);
   for(int row = index * image_slice_size; row < (index + 1) * image_slice_size; row++) {
     for(int col = 0; col < image_size; col++) {
-      /* printf("addr: %d, val: %d\n", col + row * image_size - index*image_size*image_slice_size, *(*(image + col) + row)); */
       *(slice + col + row * image_size - index*image_size*image_slice_size) = *(*(image + col) + row);
     }
   }
-  /* printf("Image Size: %d\nImage Slice Size: %d\nIndex: %d\n", image_size, image_slice_size, index); */
-  /* printf("Image: \n"); */
-  /* print_matrix_i(image, image_size, "print"); */
-  /* printf("Slice: \n"); */
-  /* print_arr(slice, image_slice_size * image_size); */
-  /* printf("\n\n"); */
   return slice;
 }
 
@@ -107,9 +137,10 @@ void master() {
   int image_slice_size = image_size * image_size / (proc_size - 1);
   int image_slice_type;
 
+  // Giving slaves their slices of image
   for(rank = 1; rank < proc_size; rank++) {
     int* image_slice = get_slice(image, image_size, image_slice_size/image_size, rank - 1);
-    print_arr(image_slice, image_slice_size);
+    /* print_arr(image_slice, image_slice_size); */
     MPI_Send(&image_slice_size, 1, MPI_INT, rank, SLICE_SIZE_TAG, MPI_COMM_WORLD);
     *(image_slice + image_slice_size) = image_size;
     MPI_Send(image_slice, image_slice_size + 1, MPI_INT, rank, SLICE_TAG, MPI_COMM_WORLD);
@@ -122,8 +153,34 @@ void master() {
     }
     MPI_Send(&image_slice_type, 1, MPI_INT, rank, SLICE_TYPE_TAG, MPI_COMM_WORLD);
   }
+
+  // Listening for debug messages and printing them
+  for(;;) {
+    char* message = malloc(50 * sizeof(char));
+    int sender, arg1, arg2, message_length;
+    MPI_Recv(message, 50, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+    sender = status.MPI_SOURCE;
+    MPI_Get_count(&status, MPI_CHAR, &message_length);
+    *(message + message_length) = '\0';
+    printf("[%d] ", sender);
+    if(status.MPI_TAG == DEBUG_MESSAGE_1_TAG) {
+      printf("%s", message);
+    } else if(status.MPI_TAG == DEBUG_MESSAGE_2_TAG) {
+      MPI_Recv(&arg1, 1, MPI_INT, sender, DEBUG_MESSAGE_FOLLOWUP_TAG, MPI_COMM_WORLD, &status);
+      printf(message, arg1);
+    } else if(status.MPI_TAG == DEBUG_MESSAGE_3_TAG) {
+      MPI_Recv(&arg1, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+      MPI_Recv(&arg2, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+      printf(message, arg1, arg2);
+    }
+    printf("\n");
+    free(message);
+  }
 }
 
+/**
+ * Given an array, forms a row_count to col_count matrix based on it,
+ */
 int** deserialize_slice(int* slice, int row_count, int col_count) {
   // Allocating space for new slice
   int** new_slice = (int**)malloc(col_count * sizeof(int*));
@@ -142,6 +199,9 @@ int** deserialize_slice(int* slice, int row_count, int col_count) {
   return new_slice;
 }
 
+/**
+ * Slave process
+ */
 void slave() {
   MPI_Status status;
   int work, rank, slice_size, slice_type, row_count, col_count;
@@ -166,7 +226,6 @@ void slave() {
 
   // Receiving type of slice which indicates whether it's at the top, bottom or middle
   MPI_Recv(&slice_type, 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-  /* printf("[%d] My Type: %d\n", rank, slice_type); */
 
   slice_matrix = deserialize_slice(slice, row_count, col_count);
   /* free_matrix_i(slice_matrix, col_count); */
@@ -190,7 +249,7 @@ void slave() {
     start_y = 0;
     end_y = row_count - 1;
   } else {
-    printf("[!] Wrong slice type: %d\n", slice_type);
+    debug_2("Wrong slice type: %d", &slice_type, &rank);
     exit(0);
   }
 
@@ -198,9 +257,6 @@ void slave() {
   int curr_x = start_x, curr_y = start_y; // Current point of slice processing
   bool job_finished = false;
   int message_exists;
-  printf("[%d] Slice I am working on: \n", rank);
-  printf("%d, %d\n", row_count, col_count);
-  print_matrix_i(slice_matrix, row_count, col_count, "print");
   for(;;) {
     MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
     if(!message_exists && !job_finished) { // Do your own job
@@ -217,38 +273,37 @@ void slave() {
           if(curr_y == end_y - 1) {
             int received_vals;
             demand_point_data(&curr_x, rank, &received_vals, 'l', status);
-            printf("[%d] Received these points: \n", rank);
-            print_arr(&received_vals, 3);
           }
-          printf("wee!\n");
-          curr_x++;
         } else if(slice_type == SLICE_TYPE_MIDDLE) {
 
         } else if(slice_type == SLICE_TYPE_BOTTOM) {
-
+          if(curr_y == 0) {
+            int received_vals;
+            demand_point_data(&curr_x, rank, &received_vals, 'u', status);
+          }
         }
+        curr_x++;
       }
     } else { // Send information according to the message
-      int x_index;
+      int x_index, y_index;
       int demander_source;
       MPI_Recv(&x_index, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
       demander_source = status.MPI_SOURCE;
-      printf("[%d] Source %d wants my x_index:%d data\n", rank, demander_source, x_index);
+      debug_3("Source %d wants my x_index:%d data", &demander_source, &x_index, &rank);
       if(status.MPI_TAG == DEMAND_DATA_FROM_UPPER_SLICE_TAG) {
-        ;
+        y_index = end_y - 1;
       } else if(status.MPI_TAG == DEMAND_DATA_FROM_LOWER_SLICE_TAG) {
-        int *points = malloc(sizeof(int) * 3); 
-        for(int i = x_index - 1; i <= x_index + 1; i++) {
-          printf("Setting point value: %d\n", *(*(slice_matrix + i) + 0));
-          *(points + i - x_index + 1) = *(*(slice_matrix + i) + 0);
-        }
-        printf("Sent these points: \n");
-        printf("%d %d %d\n", *points, *(points + 1), *(points + 2));
-        MPI_Send(points, 3, MPI_INT, demander_source, POINT_DATA_TAG, MPI_COMM_WORLD);
+        y_index = 0;
       } else {
         printf("[!] Wrong tag: %d\n", status.MPI_TAG);
         exit(0);
       }
+      int *points = malloc(sizeof(int) * 3); 
+      for(int i = x_index - 1; i <= x_index + 1; i++) {
+        *(points + i - x_index + 1) = *(*(slice_matrix + i) + y_index);
+      }
+      debug_2("Sent data to source %d", &demander_source, &rank);
+      MPI_Send(points, 3, MPI_INT, demander_source, POINT_DATA_TAG, MPI_COMM_WORLD);
     }
   }
 }
