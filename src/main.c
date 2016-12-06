@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include "string.h"
 #include "tag_types.h"
+#include "debug.h"
 
 #define SLICE_TYPE_TOP 1
 #define SLICE_TYPE_MIDDLE 2
@@ -13,21 +14,6 @@
 const int image_size = 6;
 const int smooth_image_size = image_size - 2;
 const int binary_image_size = smooth_image_size - 2;
-
-void debug_1(char *message, int *rank) {
-  MPI_Send(message, strlen(message), MPI_CHAR, 0, DEBUG_MESSAGE_1_TAG, MPI_COMM_WORLD);
-}
-
-void debug_2(char *message, int *arg1, int *rank) {
-  MPI_Send(message, strlen(message), MPI_CHAR, 0, DEBUG_MESSAGE_2_TAG, MPI_COMM_WORLD);
-  MPI_Send(arg1, 1, MPI_INT, 0, DEBUG_MESSAGE_FOLLOWUP_TAG, MPI_COMM_WORLD);
-}
-
-void debug_3(char *message, int *arg1, int *arg2, int *rank) {
-  MPI_Send(message, strlen(message), MPI_CHAR, 0, DEBUG_MESSAGE_3_TAG, MPI_COMM_WORLD);
-  MPI_Send(arg1, 1, MPI_INT, 0, DEBUG_MESSAGE_FOLLOWUP_TAG, MPI_COMM_WORLD);
-  MPI_Send(arg2, 1, MPI_INT, 0, DEBUG_MESSAGE_FOLLOWUP_TAG, MPI_COMM_WORLD);
-}
 
 int** image_from_input() {
   int** image = (int**)malloc(sizeof(int*) * image_size);
