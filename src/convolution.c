@@ -116,22 +116,3 @@ int convolute_point_i(int x, int y, int** arr, int** convoluter) {
 
   return total;
 }
-
-int** convolute_smoothen(int** arr, int arr_size) {
-  // Allocating space
-  int** convoluted_matrix = (int**)malloc(sizeof(int*) * (arr_size - 1));
-  for(int i = 0; i < arr_size - 1; i++) {
-    *(convoluted_matrix + i) = (int*)malloc(sizeof(int) * (arr_size - 1));
-  }
-
-  double** smoother_conv = get_smoother_conv();
-  // Convoluting around each point
-  for(int i = 1; i < arr_size - 1; i++) {
-    for(int j = 1; j < arr_size - 1; j++) {
-      smoothen_point(i, j, arr, smoother_conv, convoluted_matrix);
-    }
-  }
-  free_matrix_d(smoother_conv, CONVOLUTION_SIZE);
-
-  return convoluted_matrix;
-}
