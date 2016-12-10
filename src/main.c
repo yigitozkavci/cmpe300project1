@@ -64,7 +64,7 @@ int smoothen_point(int* row_1, int* row_2, int* row_3, int* rank) {
 /*
  * Demands data of three points from either top or bottom slice.
  */
-int demand_point_data(int* curr_x, int rank, int* received_vals, char type, int* is_demanded) {
+bool demand_point_data(int* curr_x, int rank, int* received_vals, char type, bool* is_demanded) {
   MPI_Status status;
   int send_tag;
   int remote_rank;
@@ -76,12 +76,12 @@ int demand_point_data(int* curr_x, int rank, int* received_vals, char type, int*
     remote_rank = rank + 1;
   } else {
     debug_1("[!] WRONG TYPE FOR demanding_point_data", &rank);
-    return 0;
+    return false;
   }
   debug_3("I want point data for index %d from %d", curr_x, &remote_rank, &rank);
 
   int message_exists = 0;
-  if(*is_demanded == 0) {
+  if(*is_demanded == false) {
     MPI_Send(
       curr_x,         // initial address of send buffer (choice)
       1,              // number of elements in send buffer (integer)
@@ -90,7 +90,7 @@ int demand_point_data(int* curr_x, int rank, int* received_vals, char type, int*
       send_tag,       // send tag (integer)
       MPI_COMM_WORLD  // communicator
     );
-    *is_demanded = 1; 
+    *is_demanded = true; 
   }
 
   while(1) { 
@@ -102,7 +102,7 @@ int demand_point_data(int* curr_x, int rank, int* received_vals, char type, int*
       break; 
     } else {
       debug_1("There is a message from other ranks. Doing its work.", &rank);
-      return 0;
+      return false;
     }
   }
 
@@ -117,8 +117,7 @@ int demand_point_data(int* curr_x, int rank, int* received_vals, char type, int*
     &status         // status
   );
 
-  debug_1("RECEIVED MESSAGE", &rank);
-  return 1;
+  return true;
 }
 
 void master() {
@@ -176,6 +175,72 @@ void master() {
 
     printf("\n");
     free(message);
+}
+}
+
+/**********************************************************************
+* Manages the process of point smoothing. Takes the whole slice
+* matrix, the current position and a special case indicator. Special
+* case is where we need a row information from another slave.
+* For this, we are sending a message using `demand_point_data` method.
+***********************************************************************/
+void process_rows_for_smoothing(
+  int** slice_matrix,    /* Matrix that this slave is responsible of. */
+
+  int curr_x,            /* Current X position that this slave
+                            is processing. */
+
+  int curr_y,            /* Current Y position that this slave is
+                            processing. */ 
+
+  int special_row,       /* Row that we want from other slaves. This can
+                            be 1, 3 or 0 (if there is no need). */
+
+  bool* is_demanded,     /* This boolean keeps track of whether a slave
+                            already sent its message demanding point
+                            data. This is just to prevent deadlock. */
+
+  bool* should_continue, /* Continue here is the actual `continue`
+                            statement. Indicates whether caller method
+                            should use continue afterwards. */
+
+  int* total,            /* Result of smoothing process. */
+
+  int* rank               /* Rank of the slave calling this method */
+) {
+  /* Validation */
+  if(special_row != 0 && special_row != 1 && special_row != 3) {
+    debug_1("WRONG SPECIAL WRONG IS PASSED!", rank);
+    exit(0);
+  }
+
+  int *row_1, *row_2, *row_3;
+  bool demand_status;
+  bool should_demand = (special_row != 0);  /* If special row is 1 or 3, we should
+                                               demand some data from other slaves. */
+  if(special_row == 1) {
+    row_1 = malloc(3 * sizeof(int));
+    demand_status = demand_point_data(&curr_x, *rank, row_1, 'u', is_demanded);
+    row_3 = *(slice_matrix + curr_y + 1) + curr_x - 1;
+  } else if(special_row == 3) {
+    row_3 = malloc(3 * sizeof(int));
+    demand_status = demand_point_data(&curr_x, *rank, row_3, 'l', is_demanded);
+    row_1 = *(slice_matrix + curr_y - 1) + curr_x - 1;
+  }
+
+  row_2 = *(slice_matrix + curr_y) + curr_x - 1;
+
+  if(should_demand && !demand_status) {
+    *should_continue = true;
+  } else {
+    *is_demanded = false;
+  }
+
+  *total = smoothen_point(row_1, row_2, row_3, rank);
+  if(special_row == 1) {
+    free(row_1);
+  } else if(special_row == 3) {
+    free(row_3);
   }
 }
 
@@ -242,8 +307,7 @@ void slave() {
   int curr_x = start_x, curr_y = start_y; // Current point of slice processing
   bool job_finished = false;
   int message_exists;
-  int* is_demanded = malloc(sizeof(int));
-  *is_demanded = 0;
+  bool is_demanded = false;
   for(;;) {
     /* If any of other slave wants demands a point, they send messages.
      * Here, we check whether another slave demands point data from us.
@@ -309,65 +373,32 @@ void slave() {
          *     Standard procedure
          */
 
+
         bool is_low_row = curr_y == end_y - 1;
         bool is_high_row = curr_y == start_y;
-        int demand_status; // 0 if demand failed, 1 otherwise.
+        bool should_continue;
+        int total;
 
-        // TODO: Test with bigger input
         if(slice_type == SLICE_TYPE_TOP) {
           if(is_low_row) {
-            int* row_1 = *(slice_matrix + curr_y - 1);
+            process_rows_for_smoothing(slice_matrix, curr_x, curr_y, 3,
+                                       &is_demanded, &should_continue, &total, &rank);
 
-            int* row_2 = *(slice_matrix + curr_y);
-
-            int* row_3 = malloc(3 * sizeof(int));
-            demand_status = demand_point_data(&curr_x, rank, row_3, 'l', is_demanded);
-
-            if(!demand_status) {
-              debug_1("Oops. Someone wants data, I'll fulfill that demand", &rank);
+            if(should_continue) {
               continue;
-            } else {
-              debug_1("Yes! I got my point data!", &rank);
-              *is_demanded = 0;
             }
-            
-            debug_row(row_1 + curr_x - 1, &rank);
-            debug_row(row_2 + curr_x - 1, &rank);
-            debug_row(row_3, &rank);
-
-            /* Smoothening the point (curr_x, curr_y) */
-            int total = smoothen_point(row_1 + curr_x - 1, row_2 + curr_x - 1, row_3, &rank);
-            debug_2("Total: %d", &total, &rank);
           } else {
-            /* Standard procedure */
-            int* row_1 = *(slice_matrix + curr_y - 1);
-            int* row_2 = *(slice_matrix + curr_y);
-            int* row_3 = *(slice_matrix + curr_y + 1);
-
-            int total = smoothen_point(row_1 + curr_x - 1, row_2 + curr_x - 1, row_3 + curr_x - 1, &rank);
-            debug_2("Total: %d", &total, &rank);
+            process_rows_for_smoothing(slice_matrix, curr_x, curr_y, 0,
+                                       &is_demanded, &should_continue, &total, &rank);
+            /* debug_2("Total: %d", &total, &rank); */
           }
         } else if(slice_type == SLICE_TYPE_MIDDLE) {
           if(is_high_row) {
-            int* row_1 = malloc(3 * sizeof(int));
-            demand_status = demand_point_data(&curr_x, rank, row_1, 'u', is_demanded);
-
-            if(!demand_status) {
-              debug_1("Oops. Someone wants data, I'll fulfill that demand", &rank);
-              continue;
-            } else {
-              *is_demanded = 0;
-              debug_1("Yes! I got my point data!", &rank);
-            }
-            
-            int* row_2 = *(slice_matrix + curr_y);
-            int* row_3 = *(slice_matrix + curr_y + 1);
-
-            debug_row(row_1, &rank);
-            debug_row(row_2 + curr_x - 1, &rank);
-            debug_row(row_3 + curr_x - 1, &rank);
-
-            int total = smoothen_point(row_1, row_2 + curr_x - 1, row_3 + curr_x - 1, &rank);
+            /* process_rows_for_smoothing(slice_matrix, curr_x, curr_y, 1, */
+            /*                            &is_demanded, &should_continue, &total, &rank); */
+            /* if(should_continue) { */
+            /*   continue; */
+            /* } */
             /* debug_2("Total: %d", &total, &rank); */
           } else if(is_low_row) {
 
