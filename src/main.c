@@ -64,7 +64,7 @@ int smoothen_point(int* row_1, int* row_2, int* row_3, int* rank) {
 /*
  * Demands data of three points from either top or bottom slice.
  */
-int demand_point_data(int* curr_x, int rank, int* received_vals, char type) {
+int demand_point_data(int* curr_x, int rank, int* received_vals, char type, int* is_demanded) {
   MPI_Status status;
   int send_tag;
   int remote_rank;
@@ -80,30 +80,44 @@ int demand_point_data(int* curr_x, int rank, int* received_vals, char type) {
   }
   debug_3("I want point data for index %d from %d", curr_x, &remote_rank, &rank);
 
-  int message_exists;
-  MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
-  if(message_exists) {
-    return 0; // Just as we want to demand point, a message arrived. Returning.
+  int message_exists = 0;
+  if(*is_demanded == 0) {
+    MPI_Send(
+      curr_x,         // initial address of send buffer (choice)
+      1,              // number of elements in send buffer (integer)
+      MPI_INT,        // type of elements in send buffer (handle)
+      remote_rank,    // rank of destination (integer)
+      send_tag,       // send tag (integer)
+      MPI_COMM_WORLD  // communicator
+    );
+    *is_demanded = 1; 
   }
 
-  MPI_Send(
-    curr_x,         // initial address of send buffer (choice)
-    1,              // number of elements in send buffer (integer)
-    MPI_INT,        // type of elements in send buffer (handle)
-    remote_rank,    // rank of destination (integer)
-    send_tag,       // send tag (integer)
-    MPI_COMM_WORLD  // communicator
-  );
+  while(1) { 
+    MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
+    if(!message_exists || status.MPI_SOURCE == rank) continue;
+    debug_1("Message exists!", &rank);
+    if(status.MPI_SOURCE == remote_rank && status.MPI_TAG == (50 + rank)) {
+      debug_1("There is a message from remote rank. Receiving it.", &rank);
+      break; 
+    } else {
+      debug_1("There is a message from other ranks. Doing its work.", &rank);
+      return 0;
+    }
+  }
+
+  // Only receive messages that are explicit for me.
   MPI_Recv(
     received_vals,  // address of receive buffer
     3,              // number of elements in receive buffer (integer)
     MPI_INT,        // type of elements in receive buffer (handle)
     remote_rank,    // rank of source (integer)
-    MPI_ANY_TAG,    // receive tag (integer)
+    (50 + rank),    // receive tag (integer)
     MPI_COMM_WORLD, // communicator
     &status         // status
   );
 
+  debug_1("RECEIVED MESSAGE", &rank);
   return 1;
 }
 
@@ -135,9 +149,9 @@ void master() {
 
   // Listening for debug messages and printing them
   for(;;) {
-    char* message = malloc(50 * sizeof(char));
+    char* message = malloc(100 * sizeof(char));
     int sender, arg1, arg2, arg3, message_length;
-    MPI_Recv(message, 50, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+    MPI_Recv(message, 100, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
     sender = status.MPI_SOURCE;
     MPI_Get_count(&status, MPI_CHAR, &message_length);
     *(message + message_length) = '\0';
@@ -228,6 +242,8 @@ void slave() {
   int curr_x = start_x, curr_y = start_y; // Current point of slice processing
   bool job_finished = false;
   int message_exists;
+  int* is_demanded = malloc(sizeof(int));
+  *is_demanded = 0;
   for(;;) {
     /* If any of other slave wants demands a point, they send messages.
      * Here, we check whether another slave demands point data from us.
@@ -235,7 +251,6 @@ void slave() {
     MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
     if(!message_exists) { // Do your own job
       if(job_finished) continue;
-      debug_1("Message: ---", &rank);
 
       /*
        * Checking boundary conditions where we need to rearrange position
@@ -244,7 +259,7 @@ void slave() {
         if(curr_y == end_y - 1) {
           job_finished = true;
           /* Informing master that my job is done */
-          int temp = 1;
+          int temp = 1333;
           debug_1("My job is done here", &rank);
           MPI_Send(&temp, 1, MPI_INT, 0, JOB_DONE_TAG, MPI_COMM_WORLD);
         } else {
@@ -306,17 +321,23 @@ void slave() {
             int* row_2 = *(slice_matrix + curr_y);
 
             int* row_3 = malloc(3 * sizeof(int));
-            demand_status = demand_point_data(&curr_x, rank, row_3, 'l');
+            demand_status = demand_point_data(&curr_x, rank, row_3, 'l', is_demanded);
+
             if(!demand_status) {
+              debug_1("Oops. Someone wants data, I'll fulfill that demand", &rank);
               continue;
+            } else {
+              debug_1("Yes! I got my point data!", &rank);
+              *is_demanded = 0;
             }
             
-            /* debug_4("%d %d %d", row_1 + curr_x - 1, row_1 + curr_x, row_1 + curr_x + 1, &rank); */
-            /* debug_4("%d %d %d", row_2 + curr_x - 1, row_2 + curr_x, row_2 + curr_x + 1, &rank); */
-            /* debug_4("%d %d %d", row_3, row_3 + 1, row_3 + 2, &rank); */
+            debug_row(row_1 + curr_x - 1, &rank);
+            debug_row(row_2 + curr_x - 1, &rank);
+            debug_row(row_3, &rank);
 
             /* Smoothening the point (curr_x, curr_y) */
             int total = smoothen_point(row_1 + curr_x - 1, row_2 + curr_x - 1, row_3, &rank);
+            debug_2("Total: %d", &total, &rank);
           } else {
             /* Standard procedure */
             int* row_1 = *(slice_matrix + curr_y - 1);
@@ -329,10 +350,22 @@ void slave() {
         } else if(slice_type == SLICE_TYPE_MIDDLE) {
           if(is_high_row) {
             int* row_1 = malloc(3 * sizeof(int));
-            demand_point_data(&curr_x, rank, row_1, 'u');
+            demand_status = demand_point_data(&curr_x, rank, row_1, 'u', is_demanded);
 
+            if(!demand_status) {
+              debug_1("Oops. Someone wants data, I'll fulfill that demand", &rank);
+              continue;
+            } else {
+              *is_demanded = 0;
+              debug_1("Yes! I got my point data!", &rank);
+            }
+            
             int* row_2 = *(slice_matrix + curr_y);
             int* row_3 = *(slice_matrix + curr_y + 1);
+
+            debug_row(row_1, &rank);
+            debug_row(row_2 + curr_x - 1, &rank);
+            debug_row(row_3 + curr_x - 1, &rank);
 
             int total = smoothen_point(row_1, row_2 + curr_x - 1, row_3 + curr_x - 1, &rank);
             /* debug_2("Total: %d", &total, &rank); */
@@ -351,7 +384,6 @@ void slave() {
         curr_x++;
       }
     } else { // Send point information according to the message
-      debug_1("Message: +++", &rank);
       /*
        * Receiving message. We already know that we have a message
        * from probe above.
@@ -380,9 +412,11 @@ void slave() {
       for(int i = x_index - 1; i <= x_index + 1; i++) {
         *(points + i - x_index + 1) = *(*(slice_matrix + y_index) + i);
       }
+      debug_2("4 am sending this row to process %d", &demander_source, &rank);
+      debug_row(points, &rank);
 
       /* Sending point data */
-      MPI_Send(points, 3, MPI_INT, demander_source, POINT_DATA_TAG, MPI_COMM_WORLD);
+      MPI_Send(points, 3, MPI_INT, demander_source, (50 + demander_source), MPI_COMM_WORLD);
     }
   }
 }
