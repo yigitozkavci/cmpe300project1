@@ -8,15 +8,19 @@
 #include "debug.h"
 #include "slice.h"
 
-#define SLICE_TYPE_TOP 1
-#define SLICE_TYPE_MIDDLE 2
-#define SLICE_TYPE_BOTTOM 3
+/* There are 3 types of slices: */
+#define SLICE_TYPE_TOP 1    /* Meaning slice is at the very top. */
+#define SLICE_TYPE_MIDDLE 2 /* Meaning slice is neither at the top or bottom. */
+#define SLICE_TYPE_BOTTOM 3 /* Meaning slice is at the very bottom. */
 
 const int image_size = 6;
 const int smooth_image_size = image_size - 2;
 const int binary_image_size = smooth_image_size - 2;
 
-void print_arr(int* arr, int size) {
+/**********************************************************************
+ * Given a matrix, prints it.
+ **********************************************************************/
+void print_matrix(int* arr, int size) {
   for(int i = 0; i < size; i++) {
     if(i != 0) printf(" ");
     printf("%d", *(arr + i));
@@ -24,6 +28,9 @@ void print_arr(int* arr, int size) {
   printf("\n");
 }
 
+/**********************************************************************
+ * Reads the input and makes a matrix out of it.
+ **********************************************************************/
 int** image_from_input() {
   int** image = (int**)malloc(sizeof(int*) * image_size);
   for(int i = 0; i < image_size; i++) {
@@ -46,12 +53,13 @@ void debug_row(int* row, int* rank) {
     debug_4("%d %d %d", row, row + 1, row + 2, rank);
 }
 
-/**
+/**********************************************************************
  * In order to smoothen a point, we need 3 rows.
+ *
  * row_1: starting address of row 1
  * row_2: starting address of row 2
  * row_3: starting address of row 3
- */
+ **********************************************************************/
 int smoothen_point(int* row_1, int* row_2, int* row_3, int* rank) {
   double smoother_val = (1.0)/9;
   int total = 0;
@@ -61,9 +69,9 @@ int smoothen_point(int* row_1, int* row_2, int* row_3, int* rank) {
   return (int) (total * smoother_val);
 }
 
-/*
+/**********************************************************************
  * Demands data of three points from either top or bottom slice.
- */
+ **********************************************************************/
 bool demand_point_data(int* curr_x, int rank, int* received_vals, char type, bool* is_demanded) {
   MPI_Status status;
   int send_tag;
@@ -106,20 +114,23 @@ bool demand_point_data(int* curr_x, int rank, int* received_vals, char type, boo
     }
   }
 
-  // Only receive messages that are explicit for me.
+  /* Only receive messages that are explicit for me. */
   MPI_Recv(
-    received_vals,  // address of receive buffer
-    3,              // number of elements in receive buffer (integer)
-    MPI_INT,        // type of elements in receive buffer (handle)
-    remote_rank,    // rank of source (integer)
-    (50 + rank),    // receive tag (integer)
-    MPI_COMM_WORLD, // communicator
-    &status         // status
+    received_vals,  /* address of receive buffer */
+    3,              /* number of elements in receive buffer (integer) */
+    MPI_INT,        /* type of elements in receive buffer (handle) */
+    remote_rank,    /* rank of source (integer) */
+    (50 + rank),    /* receive tag (integer) */
+    MPI_COMM_WORLD, /* communicator */
+    &status         /* status */
   );
 
   return true;
 }
 
+/**********************************************************************
+ * Master process
+ ***********************************************************************/
 void master() {
   int proc_size, rank;
   MPI_Status status;
@@ -132,7 +143,6 @@ void master() {
   // Giving slaves their slices of image
   for(rank = 1; rank < proc_size; rank++) {
     int* image_slice = get_slice(image, image_size, image_slice_size/image_size, rank - 1);
-    /* print_arr(image_slice, image_slice_size); */
     MPI_Send(&image_slice_size, 1, MPI_INT, rank, SLICE_SIZE_TAG, MPI_COMM_WORLD);
     *(image_slice + image_slice_size) = image_size;
     MPI_Send(image_slice, image_slice_size + 1, MPI_INT, rank, SLICE_TAG, MPI_COMM_WORLD);
@@ -175,7 +185,7 @@ void master() {
 
     printf("\n");
     free(message);
-}
+  }
 }
 
 /**********************************************************************
@@ -208,29 +218,37 @@ void process_rows_for_smoothing(
 
   int* rank               /* Rank of the slave calling this method */
 ) {
+
   /* Validation */
   if(special_row != 0 && special_row != 1 && special_row != 3) {
     debug_1("WRONG SPECIAL WRONG IS PASSED!", rank);
     exit(0);
   }
 
-  int *row_1, *row_2, *row_3;
-  bool demand_status;
-  bool should_demand = (special_row != 0);  /* If special row is 1 or 3, we should
+  int *row_1, *row_2, *row_3; /* These rows will be used for smoothing. */
+
+  bool demand_result; /* Here, this variable is very important. `demand_point_data`
+                         returns false if some other slave requested data from us
+                         while we want to demand data. So we return from that
+                         stage and fulfill that slave's demand. */
+
+  bool used_demand = (special_row != 0);  /* If special row is 1 or 3, we should
                                                demand some data from other slaves. */
+
+
   if(special_row == 1) {
     row_1 = malloc(3 * sizeof(int));
-    demand_status = demand_point_data(&curr_x, *rank, row_1, 'u', is_demanded);
+    demand_result = demand_point_data(&curr_x, *rank, row_1, 'u', is_demanded);
     row_3 = *(slice_matrix + curr_y + 1) + curr_x - 1;
   } else if(special_row == 3) {
     row_3 = malloc(3 * sizeof(int));
-    demand_status = demand_point_data(&curr_x, *rank, row_3, 'l', is_demanded);
+    demand_result = demand_point_data(&curr_x, *rank, row_3, 'l', is_demanded);
     row_1 = *(slice_matrix + curr_y - 1) + curr_x - 1;
   }
 
   row_2 = *(slice_matrix + curr_y) + curr_x - 1;
 
-  if(should_demand && !demand_status) {
+  if(used_demand && demand_result == false) {
     *should_continue = true;
   } else {
     *is_demanded = false;
@@ -372,7 +390,6 @@ void slave() {
          *   Else
          *     Standard procedure
          */
-
 
         bool is_low_row = curr_y == end_y - 1;
         bool is_high_row = curr_y == start_y;
