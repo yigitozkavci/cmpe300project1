@@ -53,7 +53,6 @@ int smoothen_point(int* row_1, int* row_2, int* row_3, int* rank) {
   for(int i = 0; i < 3; i++) {
     total += *(row_1 + i) + *(row_2 + i) + *(row_3 + i);
   }
-  debug_2("Smoothen: %d", (int*) &(total), rank);
   return (int) (total * smoother_val);
 }
 
@@ -139,6 +138,8 @@ void master() {
       MPI_Recv(&arg2, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
       MPI_Recv(&arg3, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
       printf(message, arg1, arg2, arg3);
+    } else if(status.MPI_TAG == JOB_DONE_TAG) {
+      debug_2("I've heard that slave %d finished its job.", &sender, &rank);
     }
 
     printf("\n");
@@ -215,16 +216,29 @@ void slave() {
      */
     MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
     if(!message_exists) { // Do your own job
-      if(curr_x == end_x) { // Boundary conditions where we need to rearrange position
-        if(curr_y == end_y) {
+      if(job_finished) continue;
+
+      /*
+       * Checking boundary conditions where we need to rearrange position
+       */
+      if(curr_x == end_x) {
+        if(curr_y == end_y - 1) {
           job_finished = true;
+          /* Informing master that my job is done */
+          int temp = 1;
+          debug_1("My job is done here", &rank);
+          MPI_Send(&temp, 1, MPI_INT, 0, JOB_DONE_TAG, MPI_COMM_WORLD);
         } else {
           curr_x = 0;
           curr_y++;
         }
       } else { // We can process (curr_x, curr_y) without hesitation now
+        if(rank == 1)
+          debug_3("Processing point (%d, %d)", &curr_x, &curr_y, &rank);
 
         /**
+         * SLICE POSITIONING
+         *
          * * -------------------------- *
          * * HIGH   slice HIGH   row    *
          * * HIGH   slice MIDDLE row    *
@@ -238,6 +252,10 @@ void slave() {
          * * BOTTOM slice MIDDLE row    *
          * * BOTTOM slice LOW    row    *
          * * -------------------------- *
+         */
+
+        /**
+         * DEMANDING CONDITIONS
          *
          * TOP slice
          *   LOW row:
@@ -257,26 +275,37 @@ void slave() {
          *   Else
          *     Standard procedure
          */
-        if(slice_type == SLICE_TYPE_TOP) {
-          if(curr_y == end_y - 1) {
 
-            /* Rows gathered correctly! */
+        bool is_low_row = curr_y == end_y - 1;
+        bool is_high_row = curr_y == start_y;
+
+        // TODO: Test with bigger input
+        if(slice_type == SLICE_TYPE_TOP) {
+          if(is_low_row) {
+            debug_1("First section!", &rank);
             int* row_1 = *(slice_matrix + curr_y - 1);
+
             int* row_2 = *(slice_matrix + curr_y);
+
             int* row_3 = malloc(3 * sizeof(int));
             demand_point_data(&curr_x, rank, row_3, 'l');
+
             /* debug_4("%d %d %d", row_1 + curr_x - 1, row_1 + curr_x, row_1 + curr_x + 1, &rank); */
             /* debug_4("%d %d %d", row_2 + curr_x - 1, row_2 + curr_x, row_2 + curr_x + 1, &rank); */
             /* debug_4("%d %d %d", row_3, row_3 + 1, row_3 + 2, &rank); */
-            free(row_3);
+
+            /* Smoothening the point (curr_x, curr_y) */
             int total = smoothen_point(row_1 + curr_x - 1, row_2 + curr_x - 1, row_3, &rank);
-            debug_2("Total: %d", &total, &rank);
+          } else {
+            debug_1("Second section!", &rank);
+            /* Standard procedure */
+            int* row_1 = *(slice_matrix + curr_y - 1);
+            int* row_2 = *(slice_matrix + curr_y);
+            int* row_3 = *(slice_matrix + curr_y + 1);
+
+            int total = smoothen_point(row_1 + curr_x - 1, row_2 + curr_x - 1, row_3 + curr_x - 1, &rank);
           }
         } else if(slice_type == SLICE_TYPE_MIDDLE) {
-            /* int* row_1 = *(slice_matrix + curr_y - 1); */
-            /* int* row_2 = *(slice_matrix + curr_y); */
-            /* int* row_3 = *(slice_matrix + curr_y + 1); */
-            /* int total = smoothen_point(row_1 + curr_x - 1, row_2 + curr_x - 1, row_3, &rank); */
         } else if(slice_type == SLICE_TYPE_BOTTOM) {
           /* if(curr_y == 0) { */
           /*   int received_vals; */
@@ -285,14 +314,20 @@ void slave() {
         }
         curr_x++;
       }
-    } else { // Send information according to the message
+    } else { // Send point information according to the message
+      /*
+       * Receiving message. We already know that we have a message
+       * from probe above.
+       */
       int x_index, y_index;
       int demander_source;
-      debug_1("Message exists!", &rank);
       MPI_Recv(&x_index, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-      debug_2("%d", &x_index, &rank);
       demander_source = status.MPI_SOURCE;
-      debug_3("Source %d wants my x_index:%d data", &demander_source, &x_index, &rank);
+
+      /* 
+       * Determining y-index based on demand type of data.
+       * Slaves can demand data from either higher or lower rows.
+       */
       if(status.MPI_TAG == DEMAND_DATA_FROM_UPPER_SLICE_TAG) {
         y_index = end_y - 1;
       } else if(status.MPI_TAG == DEMAND_DATA_FROM_LOWER_SLICE_TAG) {
@@ -301,11 +336,14 @@ void slave() {
         printf("[!] Wrong tag: %d\n", status.MPI_TAG);
         exit(0);
       }
+
+      /* Writing point data to send */
       int *points = malloc(sizeof(int) * 3); 
       for(int i = x_index - 1; i <= x_index + 1; i++) {
         *(points + i - x_index + 1) = *(*(slice_matrix + y_index) + i);
       }
-      debug_2("Sent data to source %d", &demander_source, &rank);
+
+      /* Sending point data */
       MPI_Send(points, 3, MPI_INT, demander_source, POINT_DATA_TAG, MPI_COMM_WORLD);
     }
   }
