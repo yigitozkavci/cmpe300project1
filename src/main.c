@@ -6,6 +6,7 @@
 #include "string.h"
 #include "tag_types.h"
 #include "debug.h"
+#include "slice.h"
 
 #define SLICE_TYPE_TOP 1
 #define SLICE_TYPE_MIDDLE 2
@@ -14,6 +15,14 @@
 const int image_size = 6;
 const int smooth_image_size = image_size - 2;
 const int binary_image_size = smooth_image_size - 2;
+
+void print_arr(int* arr, int size) {
+  for(int i = 0; i < size; i++) {
+    if(i != 0) printf(" ");
+    printf("%d", *(arr + i));
+  }
+  printf("\n");
+}
 
 int** image_from_input() {
   int** image = (int**)malloc(sizeof(int*) * image_size);
@@ -32,26 +41,27 @@ int** image_from_input() {
   return image;
 }
 
+/**
+ * In order to smoothen a point, we need 3 rows.
+ * row_1: starting address of row 1
+ * row_2: starting address of row 2
+ * row_3: starting address of row 3
+ */
 int smoothen_point(int* row_1, int* row_2, int* row_3, int* rank) {
-  double smoother_val = 1.0/9;
+  double smoother_val = (1.0)/9;
   double total = 0;
-  debug_3("Row 1: %d, %d", row_1, row_1 + 1, rank);
-  debug_3("Row 2: %d, %d", row_2, row_2 + 1, rank);
-  /* for(int col = 0; col < 3; col++) { */
-  /*   debug_2("Processing point of value %d", row_1 + col, rank); */
-  /*   total += *(row_1 + col) + smoother_val; */
-  /*   debug_2("Processing point of value %d", row_2 + col, rank); */
-  /*   total += *(row_2 + col) + smoother_val; */
-  /*   debug_2("Processing point of value %d", row_3 + col, rank); */
-  /*   total += *(row_3 + col) + smoother_val; */
-  /* } */
-  return (int) total;
+  for(int i = 0; i < 3; i++) {
+    total += *(row_1 + i) + *(row_2 + i) + *(row_3 + i);
+  }
+  debug_2("Smoothen: %d", (int*) &(total), rank);
+  return (int) (total * smoother_val);
 }
 
 /*
  * Demands data of three points from either top or bottom slice.
  */
-void demand_point_data(int* curr_x, int rank, int* received_vals, char type, MPI_Status status) {
+void demand_point_data(int* curr_x, int rank, int* received_vals, char type) {
+  MPI_Status status;
   int send_tag;
   int remote_rank;
   if(type == 'u') {
@@ -61,7 +71,6 @@ void demand_point_data(int* curr_x, int rank, int* received_vals, char type, MPI
     send_tag = DEMAND_DATA_FROM_LOWER_SLICE_TAG;
     remote_rank = rank + 1;
   }
-  debug_3("Demanding data for index %d from process %d", curr_x, &remote_rank, &rank);
   MPI_Send(
     curr_x,         // initial address of send buffer (choice)
     1,              // number of elements in send buffer (integer)
@@ -79,22 +88,6 @@ void demand_point_data(int* curr_x, int rank, int* received_vals, char type, MPI
     MPI_COMM_WORLD, // communicator
     &status         // status
   );
-  debug_3("Received these data for index %d from process %d", curr_x, &remote_rank, &rank);
-  /* print_arr(received_vals, 3); */
-}
-
-/**
- * Splits image into given sizes and returns serialized version of the slice in given index.
- */
-int* get_slice(int** image, int image_size, int image_slice_size, int index) {
-  // We are keeping slice as contiguous mamory because it'll be passed via MPI
-  int* slice = (int*)malloc(sizeof(int) * image_slice_size * image_size);
-  for(int row = index * image_slice_size; row < (index + 1) * image_slice_size; row++) {
-    for(int col = 0; col < image_size; col++) {
-      *(slice + col + row * image_size - index*image_size*image_slice_size) = *(*(image + col) + row);
-    }
-  }
-  return slice;
 }
 
 void master() {
@@ -126,7 +119,7 @@ void master() {
   // Listening for debug messages and printing them
   for(;;) {
     char* message = malloc(50 * sizeof(char));
-    int sender, arg1, arg2, message_length;
+    int sender, arg1, arg2, arg3, message_length;
     MPI_Recv(message, 50, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
     sender = status.MPI_SOURCE;
     MPI_Get_count(&status, MPI_CHAR, &message_length);
@@ -141,31 +134,16 @@ void master() {
       MPI_Recv(&arg1, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
       MPI_Recv(&arg2, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
       printf(message, arg1, arg2);
+    }  else if(status.MPI_TAG == DEBUG_MESSAGE_4_TAG) {
+      MPI_Recv(&arg1, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+      MPI_Recv(&arg2, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+      MPI_Recv(&arg3, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+      printf(message, arg1, arg2, arg3);
     }
+
     printf("\n");
     free(message);
   }
-}
-
-/**
- * Given an array, forms a row_count to col_count matrix based on it,
- */
-int** deserialize_slice(int* slice, int row_count, int col_count) {
-  // Allocating space for new slice
-  int** new_slice = (int**)malloc(col_count * sizeof(int*));
-  for(int col = 0; col < col_count; col++) {
-    *(new_slice + col) = (int*)malloc(row_count * sizeof(int));
-  }
-
-  // Filling new slice matrix
-  for(int row = 0; row < row_count; row++) {
-    for(int col = 0; col < col_count; col++) {
-      *(*(new_slice + row) + col) = *(slice + row * col_count + col);
-    }
-  }
-
-  free(slice);
-  return new_slice;
 }
 
 /**
@@ -232,8 +210,11 @@ void slave() {
   bool job_finished = false;
   int message_exists;
   for(;;) {
+    /* If any of other slave wants demands a point, they send messages.
+     * Here, we check whether another slave demands point data from us.
+     */
     MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
-    if(!message_exists && !job_finished) { // Do your own job
+    if(!message_exists) { // Do your own job
       if(curr_x == end_x) { // Boundary conditions where we need to rearrange position
         if(curr_y == end_y) {
           job_finished = true;
@@ -242,31 +223,74 @@ void slave() {
           curr_y++;
         }
       } else { // We can process (curr_x, curr_y) without hesitation now
-        // Check if we need to send a message for boundary points
+
+        /**
+         * * -------------------------- *
+         * * HIGH   slice HIGH   row    *
+         * * HIGH   slice MIDDLE row    *
+         * * HIGH   slice LOW    row    *
+         * * -------------------------- *
+         * * MIDDLE slice HIGH   row    *
+         * * MIDDLE slice MIDDLE row    *
+         * * MIDDLE slice LOW    row    *
+         * * -------------------------- *
+         * * BOTTOM slice HIGH   row    *
+         * * BOTTOM slice MIDDLE row    *
+         * * BOTTOM slice LOW    row    *
+         * * -------------------------- *
+         *
+         * TOP slice
+         *   LOW row:
+         *     Demand data from lower slice
+         *   Else
+         *     Standard procedure
+         * MIDDLE slice:
+         *   LOW row:
+         *     Demand data from lower slice
+         *   HIGH row:
+         *     Demand data from upper slice
+         *   Else:
+         *     Standard procedure
+         * BOTTOM slice
+         *   HIGH row:
+         *     Demand data from lower slice
+         *   Else
+         *     Standard procedure
+         */
         if(slice_type == SLICE_TYPE_TOP) {
           if(curr_y == end_y - 1) {
-            int* row_1 = *(slice_matrix + curr_y - 1) + curr_x - 1;
-            int* row_2 = *(slice_matrix + curr_y) + curr_x - 1;
-            /* debug_3("Row 1: %d, %d", row_1, row_1 + 1, &rank); */
-            /* debug_3("Row 2: %d, %d", row_2, row_2 + 1, &rank); */
-            int row_3;
-            demand_point_data(&curr_x, rank, &row_3, 'l', status);
-            smoothen_point(row_1, row_2, &row_3, &rank);
+
+            /* Rows gathered correctly! */
+            int* row_1 = *(slice_matrix + curr_y - 1);
+            int* row_2 = *(slice_matrix + curr_y);
+            int* row_3 = malloc(3 * sizeof(int));
+            demand_point_data(&curr_x, rank, row_3, 'l');
+            /* debug_4("%d %d %d", row_1 + curr_x - 1, row_1 + curr_x, row_1 + curr_x + 1, &rank); */
+            /* debug_4("%d %d %d", row_2 + curr_x - 1, row_2 + curr_x, row_2 + curr_x + 1, &rank); */
+            /* debug_4("%d %d %d", row_3, row_3 + 1, row_3 + 2, &rank); */
+            free(row_3);
+            int total = smoothen_point(row_1 + curr_x - 1, row_2 + curr_x - 1, row_3, &rank);
+            debug_2("Total: %d", &total, &rank);
           }
         } else if(slice_type == SLICE_TYPE_MIDDLE) {
-           
+            /* int* row_1 = *(slice_matrix + curr_y - 1); */
+            /* int* row_2 = *(slice_matrix + curr_y); */
+            /* int* row_3 = *(slice_matrix + curr_y + 1); */
+            /* int total = smoothen_point(row_1 + curr_x - 1, row_2 + curr_x - 1, row_3, &rank); */
         } else if(slice_type == SLICE_TYPE_BOTTOM) {
-          if(curr_y == 0) {
-            int received_vals;
-            demand_point_data(&curr_x, rank, &received_vals, 'u', status);
-          }
+          /* if(curr_y == 0) { */
+          /*   int received_vals; */
+          /*   demand_point_data(&curr_x, rank, &received_vals, 'u', status); */
+          /* } */
         }
         curr_x++;
       }
     } else { // Send information according to the message
       int x_index, y_index;
       int demander_source;
+      debug_1("Message exists!", &rank);
       MPI_Recv(&x_index, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+      debug_2("%d", &x_index, &rank);
       demander_source = status.MPI_SOURCE;
       debug_3("Source %d wants my x_index:%d data", &demander_source, &x_index, &rank);
       if(status.MPI_TAG == DEMAND_DATA_FROM_UPPER_SLICE_TAG) {
