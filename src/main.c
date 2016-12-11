@@ -165,15 +165,12 @@ void master() {
       MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
       if(!message_exists && job_finished_count == proc_size - 1) {
         printf("Smoothing is completed.\n");
-        int temp;
-        MPI_Request request;
-        MPI_Isend(&temp, 1, MPI_INT, job_to_finish, FINISH_SMOOTHING_TAG, MPI_COMM_WORLD, &request);
+        /* int temp; */
+        /* MPI_Request request; */
+        /* MPI_Isend(&temp, 1, MPI_INT, job_to_finish, FINISH_SMOOTHING_TAG, MPI_COMM_WORLD, &request); */
         job_to_finish++;
         continue;
       }
-    } else {
-      printf("WOW\n");
-      return;
     }
 
     int sender, arg1, arg2, arg3, message_length, message_exists;
@@ -305,11 +302,11 @@ void process_rows_for_smoothing(
 
 
   if(special_row == 1) {
-    row_1 = malloc(3 * sizeof(int));
+    row_1 = malloc(sizeof(int) * 3);
     demand_result = demand_point_data(&curr_x, *rank, row_1, 'u', is_demanded);
     row_3 = *(slice_matrix + curr_y + 1) + curr_x - 1;
   } else if(special_row == 3) {
-    row_3 = malloc(3 * sizeof(int));
+    row_3 = malloc(sizeof(int) * 3);
     demand_result = demand_point_data(&curr_x, *rank, row_3, 'l', is_demanded);
     row_1 = *(slice_matrix + curr_y - 1) + curr_x - 1;
   } else {
@@ -449,6 +446,7 @@ void slave() {
 
       /* Sending point data */
       MPI_Send(points, 3, MPI_INT, demander_source, (50 + demander_source), MPI_COMM_WORLD);
+      free(points);
 
     } else { // Do your own job
       if(job_finished) continue;
