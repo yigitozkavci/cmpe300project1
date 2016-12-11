@@ -36,7 +36,6 @@ int* serialize_slice(int** slice, int row_count, int col_count) {
   for(int row = 0; row < row_count; row++) {
     for(int col = 0; col < col_count; col++) {
       int num = *(*(slice + col) + row);
-      printf("Value for (%d, %d) is %d\n", row, col, num);
       *(flat_slice + col_count * row + col) = num;    
     }
   }

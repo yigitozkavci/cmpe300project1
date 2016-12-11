@@ -37,10 +37,6 @@ int** image_from_input() {
   return image;
 }
 
-void debug_row(int* row, int* rank) {
-  debug_4("%d %d %d", row, row + 1, row + 2, rank);
-}
-
 /**********************************************************************
  * In order to smoothen a point, we need 3 rows.
  *
@@ -74,7 +70,6 @@ bool demand_point_data(int* curr_x, int rank, int* received_vals, char type, boo
     debug_1("[!] WRONG TYPE FOR demanding_point_data", &rank);
     return false;
   }
-  /* debug_3("I want point data for index %d from %d", curr_x, &remote_rank, &rank); */
 
   int message_exists = 0;
   if(*is_demanded == false) {
@@ -86,14 +81,14 @@ bool demand_point_data(int* curr_x, int rank, int* received_vals, char type, boo
       send_tag,       // send tag (integer)
       MPI_COMM_WORLD  // communicator
     );
-    *is_demanded = true; 
+    *is_demanded = true;
   }
 
-  while(1) { 
+  while(1) {
     MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
     if(!message_exists || status.MPI_SOURCE == rank) continue;
     if(status.MPI_SOURCE == remote_rank && status.MPI_TAG == (50 + rank)) {
-      break; 
+      break;
     } else {
       return false;
     }
@@ -155,28 +150,39 @@ void master() {
 
   // Listening for debug messages and printing them
   int job_to_finish = 1;
-  MPI_Request request;
   int message_exists;
   int job_finished_count = 0;
+
+  /* Allocating space for the new smoothened image. */
+  int** new_image = (int**)malloc(sizeof(int*) * image_size);
+  for(int i = 0; i < image_size; i++) {
+    *(new_image + i) = (int*)malloc(sizeof(int) * image_size);
+    for(int j = 0; j < image_size; j++) {
+      *(*(new_image + i) + j) = 0;
+    }
+  }
+
   for(;;) {
-    if(job_to_finish == proc_size) break;
-    MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
-    if(!message_exists && job_finished_count == proc_size - 1) {
-      printf("Smoothing is completed.\n");
-      int temp;
-      /* MPI_Isend(&temp, 1, MPI_INT, job_to_finish, FINISH_SMOOTHING_TAG, MPI_COMM_WORLD, &request); */
-      job_to_finish++;
-      continue;
+    if(job_to_finish != proc_size) {
+      MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
+      if(!message_exists && job_finished_count == proc_size - 1) {
+        printf("Smoothing is completed.\n");
+        /* MPI_Isend(&temp, 1, MPI_INT, job_to_finish, FINISH_SMOOTHING_TAG, MPI_COMM_WORLD, &request); */
+        job_to_finish++;
+        continue;
+      }
     }
 
-    int sender, arg1, arg2, arg3, arg4, arg5, arg6, message_length, message_exists;
+    int sender, arg1, arg2, arg3, message_length, message_exists;
     MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
 
     sender = status.MPI_SOURCE;
     if(message_exists) {
       if(is_debug_tag(status.MPI_TAG)) {
-        char* message = malloc(100 * sizeof(char));
-        MPI_Recv(message, 100, MPI_CHAR, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+        int msg_length;
+        MPI_Get_count(&status, MPI_CHAR, &msg_length);
+        char* message = malloc(msg_length * sizeof(char));
+        MPI_Recv(message, msg_length, MPI_CHAR, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
         MPI_Get_count(&status, MPI_CHAR, &message_length);
         *(message + message_length) = '\0';
         printf("[%d] ", sender);
@@ -198,21 +204,34 @@ void master() {
         printf("\n");
         free(message);
       } else if(status.MPI_TAG == JOB_DONE_TAG) {
+        /* Receiving slice array length from slave */
         int slice_arr_length;
-        /* MPI_Get_count(&status, MPI_INT, &count); */
         MPI_Recv(&slice_arr_length, 1, MPI_INT, sender, JOB_DONE_TAG, MPI_COMM_WORLD, &status);
-        printf("Length: %d\n", slice_arr_length);
+
+        /* Receiving deserialized slice array from slave */
         int* slice_arr = malloc(sizeof(int) * slice_arr_length);
         MPI_Recv(slice_arr, slice_arr_length, MPI_INT, sender, FOLLOWING_JOB_DONE_TAG, MPI_COMM_WORLD, &status);
-        printf("I've heard that slave %d finished its job, here is its array:\n", sender);
-        for(int i = 0; i < slice_arr_length; i++) {
-          printf("%d ", *(slice_arr + i));
+
+        printf("I've heard that slave %d finished its job, here is the result:\n", sender);
+        /* Putting that serialized slice array to new_image. */
+        int slice_row_count = image_size / (proc_size - 1);
+        int slice_col_count = image_size;
+        for(int row = 0; row < slice_row_count; row++) {
+          for(int col = 0; col < slice_col_count; col++) {
+            int slice_row_offset = (sender - 1) * slice_row_count;
+            int arr_val = *(slice_arr + row * slice_col_count + col);
+            *(*(new_image + col) + row + slice_row_offset) = arr_val;
+          }
+        }
+        for(int row = 0; row < image_size; row++) {
+          for(int col = 0; col < image_size; col++) {
+            printf("%d ", *(*(new_image + col) + row));
+          }
+          printf("\n");
         }
         printf("\n");
         job_finished_count++;
-        printf("Jobs finished: %d\n", job_finished_count);
       }
-
     }
   }
 }
@@ -247,7 +266,7 @@ void process_rows_for_smoothing(
                             is processing. */
 
   int curr_y,            /* Current Y position that this slave is
-                            processing. */ 
+                            processing. */
 
   int special_row,       /* Row that we want from other slaves. This can
                             be 1, 3 or 0 (if there is no need). */
@@ -290,7 +309,11 @@ void process_rows_for_smoothing(
     row_3 = malloc(3 * sizeof(int));
     demand_result = demand_point_data(&curr_x, *rank, row_3, 'l', is_demanded);
     row_1 = *(slice_matrix + curr_y - 1) + curr_x - 1;
+  } else {
+    row_1 = *(slice_matrix + curr_y - 1) + curr_x - 1;
+    row_3 = *(slice_matrix + curr_y + 1) + curr_x - 1;
   }
+
 
   row_2 = *(slice_matrix + curr_y) + curr_x - 1;
 
@@ -314,7 +337,7 @@ void process_rows_for_smoothing(
  **********************************************************************/
 void slave() {
   MPI_Status status;
-  int work, rank, slice_size, slice_type, row_count, col_count;
+  int rank, slice_size, slice_type, row_count, col_count;
   int* slice;         // Slice that this slave is going to work on. It's an array.
   int** slice_matrix; // We are receiving slice as an array but then deserializing it to matrix.
 
@@ -332,7 +355,7 @@ void slave() {
   slice = (int*) malloc((slice_size + 1) * sizeof(int)); // Allocating space for slave's slice
   MPI_Recv(slice, slice_size + 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
   col_count = *(slice + slice_size);
-  row_count = slice_size/col_count; 
+  row_count = slice_size/col_count;
 
   // Receiving type of slice which indicates whether it's at the top, bottom or middle
   MPI_Recv(&slice_type, 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
@@ -350,7 +373,6 @@ void slave() {
   for(int col = 0; col < col_count; col++) {
     *(smoothened_slice + col) = (int*)malloc(row_count * sizeof(int));
     for(int row = 0; row < row_count; row++) {
-      debug_3("Setting (%d, %d)", &row, &col, &rank);
       *(*(smoothened_slice + col) + row) = 0;
     }
   }
@@ -386,14 +408,13 @@ void slave() {
     MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
     someone_need_me = status.MPI_TAG == DEMAND_DATA_FROM_UPPER_SLICE_TAG
                    || status.MPI_TAG == DEMAND_DATA_FROM_LOWER_SLICE_TAG;
-    
+
     if(status.MPI_TAG == FINISH_SMOOTHING_TAG) {
       printf("Slave is returning.\n");
       return;
     }
 
     if(message_exists && someone_need_me) {
-      debug_1("Message exists!", &rank);
 
       /*
        * Receiving message. We already know that we have a message
@@ -401,12 +422,10 @@ void slave() {
        */
       int x_index, y_index;
       int demander_source;
-      debug_1("There is a message for me.", &rank);
       MPI_Recv(&x_index, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-      debug_1("Took the message.", &rank);
       demander_source = status.MPI_SOURCE;
 
-      /* 
+      /*
        * Determining y-index based on demand type of data.
        * Slaves can demand data from either higher or lower rows.
        */
@@ -420,7 +439,7 @@ void slave() {
       }
 
       /* Writing point data to send */
-      int *points = malloc(sizeof(int) * 3); 
+      int *points = malloc(sizeof(int) * 3);
       for(int i = x_index - 1; i <= x_index + 1; i++) {
         *(points + i - x_index + 1) = *(*(slice_matrix + y_index) + i);
       }
@@ -430,7 +449,6 @@ void slave() {
 
     } else { // Do your own job
       if(job_finished) continue;
-      debug_3("Processing (%d, %d)", &curr_x, &curr_y, &rank);
 
       /*
        * Checking boundary conditions where we need to rearrange position
@@ -440,22 +458,21 @@ void slave() {
           job_finished = true;
           /* Informing master that my job is done */
           int slice_size = row_count * col_count;
-          debug_1("My job is done here", &rank);
           MPI_Send(&slice_size, 1, MPI_INT, 0, JOB_DONE_TAG, MPI_COMM_WORLD);
-          printf("\n%d %d %d %d %d %d\n%d %d %d %d %d %d\n",
-            *(*(smoothened_slice + 0) + 0),
-            *(*(smoothened_slice + 1) + 0),
-            *(*(smoothened_slice + 2) + 0),
-            *(*(smoothened_slice + 3) + 0),
-            *(*(smoothened_slice + 4) + 0),
-            *(*(smoothened_slice + 5) + 0),
-            *(*(smoothened_slice + 0) + 1),
-            *(*(smoothened_slice + 1) + 1),
-            *(*(smoothened_slice + 2) + 1),
-            *(*(smoothened_slice + 3) + 1),
-            *(*(smoothened_slice + 4) + 1),
-            *(*(smoothened_slice + 5) + 1)
-          );
+          /* printf("\n%d %d %d %d %d %d\n%d %d %d %d %d %d\n", */
+          /*   *(*(smoothened_slice + 0) + 0), */
+          /*   *(*(smoothened_slice + 1) + 0), */
+          /*   *(*(smoothened_slice + 2) + 0), */
+          /*   *(*(smoothened_slice + 3) + 0), */
+          /*   *(*(smoothened_slice + 4) + 0), */
+          /*   *(*(smoothened_slice + 5) + 0), */
+          /*   *(*(smoothened_slice + 0) + 1), */
+          /*   *(*(smoothened_slice + 1) + 1), */
+          /*   *(*(smoothened_slice + 2) + 1), */
+          /*   *(*(smoothened_slice + 3) + 1), */
+          /*   *(*(smoothened_slice + 4) + 1), */
+          /*   *(*(smoothened_slice + 5) + 1) */
+          /* ); */
           int* slice = serialize_slice(smoothened_slice, row_count, col_count);
           MPI_Send(slice, row_count * col_count, MPI_INT, 0, FOLLOWING_JOB_DONE_TAG, MPI_COMM_WORLD);
         } else {
@@ -489,18 +506,18 @@ void slave() {
           } else {
             special_row = 0;
           }
+        } else {
+          printf("Wrong slice type: %d", slice_type);
+          exit(0);
         }
 
         process_rows_for_smoothing(slice_matrix, curr_x, curr_y, special_row,
                                    &is_demanded, &should_continue, &total, &rank);
 
         if(should_continue) {
-          debug_1("Continuing...", &rank);
           continue;
         }
-        /* debug_4("(%d, %d) TOTAL: %d", &curr_x, &curr_y, &total, &rank); */
         *(*(smoothened_slice + curr_x) + curr_y) = total;
-        debug_4("Assigned value %d to (%d, %d)\n", *(smoothened_slice + curr_x) + curr_y, &curr_x, &curr_y, &rank);
         curr_x++;
       }
     }
@@ -520,6 +537,6 @@ int main(int argc, char* argv[]) {
     printf("Slave is finished.\n");
   }
 
-  printf("Finalizing\n");
+  printf("Finalizing %d\n", rank);
   MPI_Finalize();
 }
