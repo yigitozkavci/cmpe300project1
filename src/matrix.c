@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include "debug.h"
 
 void print_matrix_d(double** matrix, int size) {
   for(int i = 0; i < size; i++) {
@@ -13,25 +14,15 @@ void print_matrix_d(double** matrix, int size) {
   }
 }
 
-void print_matrix_i(int** matrix, int rows, int cols, char* filename) {
-  FILE *f;
-  if(strncmp(filename, "print", 5) == 0)
-    f = fopen(filename, "w");
+void print_matrix_i(int** matrix, int rows, int cols, char* filename, int* rank) {
+  if(*rank != 1) return;
+  debug_1("\n\n", rank);
   for(int i = 0; i < rows; i++) {
     for(int j = 0; j < cols; j++) {
-      if(strncmp(filename, "print", 5) == 0) {
-        if(j != 0) printf(" ");
-        printf("%d", *(*(matrix + j) + i));
-      } else {
-        if(j != 0) fprintf(f, " ");
-        fprintf(f, "%d", *(*(matrix + j) + i));
-      }
+      char* str;
+      debug_2("%d", (*(matrix + j) + i), rank);
     }
-    if(strncmp(filename, "print", 5) == 0) {
-      printf("\n");
-    } else {
-      fprintf(f, "\n");
-    }
+    debug_1("\n", rank);
   }
 }
 

@@ -18,17 +18,6 @@ const int smooth_image_size = image_size - 2;
 const int binary_image_size = smooth_image_size - 2;
 
 /**********************************************************************
- * Given a matrix, prints it.
- **********************************************************************/
-void print_matrix(int* arr, int size) {
-  for(int i = 0; i < size; i++) {
-    if(i != 0) printf(" ");
-    printf("%d", *(arr + i));
-  }
-  printf("\n");
-}
-
-/**********************************************************************
  * Reads the input and makes a matrix out of it.
  **********************************************************************/
 int** image_from_input() {
@@ -124,6 +113,13 @@ bool demand_point_data(int* curr_x, int rank, int* received_vals, char type, boo
   return true;
 }
 
+bool is_debug_tag(int tag) {
+  return (tag == DEBUG_MESSAGE_1_TAG) ||
+         (tag == DEBUG_MESSAGE_2_TAG) ||
+         (tag == DEBUG_MESSAGE_3_TAG) ||
+         (tag == DEBUG_MESSAGE_4_TAG);
+}
+
 /**********************************************************************
  * Master process
  ***********************************************************************/
@@ -138,7 +134,7 @@ void master() {
 
   // Giving slaves their slices of image
   for(rank = 1; rank < proc_size; rank++) {
-    int* image_slice = get_slice(image, image_size, image_slice_size/image_size, rank - 1);
+    int* image_slice = extract_slice(image, image_size, image_slice_size/image_size, rank - 1);
     MPI_Send(&image_slice_size, 1, MPI_INT, rank, SLICE_SIZE_TAG, MPI_COMM_WORLD);
     *(image_slice + image_slice_size) = image_size;
     MPI_Send(image_slice, image_slice_size + 1, MPI_INT, rank, SLICE_TAG, MPI_COMM_WORLD);
@@ -152,6 +148,11 @@ void master() {
     MPI_Send(&image_slice_type, 1, MPI_INT, rank, SLICE_TYPE_TAG, MPI_COMM_WORLD);
   }
 
+  for(int i = 0; i < image_size; i++) {
+    free(*(image + i));
+  }
+  free(image);
+
   // Listening for debug messages and printing them
   int job_to_finish = 1;
   MPI_Request request;
@@ -163,40 +164,56 @@ void master() {
     if(!message_exists && job_finished_count == proc_size - 1) {
       printf("Smoothing is completed.\n");
       int temp;
-      MPI_Isend(&temp, 1, MPI_INT, job_to_finish, FINISH_SMOOTHING_TAG, MPI_COMM_WORLD, &request);
+      /* MPI_Isend(&temp, 1, MPI_INT, job_to_finish, FINISH_SMOOTHING_TAG, MPI_COMM_WORLD, &request); */
       job_to_finish++;
       continue;
     }
 
-    char* message = malloc(100 * sizeof(char));
-    int sender, arg1, arg2, arg3, message_length;
-    MPI_Recv(message, 100, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-    sender = status.MPI_SOURCE;
-    MPI_Get_count(&status, MPI_CHAR, &message_length);
-    *(message + message_length) = '\0';
-    printf("[%d] ", sender);
-    if(status.MPI_TAG == DEBUG_MESSAGE_1_TAG) {
-      printf("%s", message);
-    } else if(status.MPI_TAG == DEBUG_MESSAGE_2_TAG) {
-      MPI_Recv(&arg1, 1, MPI_INT, sender, DEBUG_MESSAGE_FOLLOWUP_TAG, MPI_COMM_WORLD, &status);
-      printf(message, arg1);
-    } else if(status.MPI_TAG == DEBUG_MESSAGE_3_TAG) {
-      MPI_Recv(&arg1, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-      MPI_Recv(&arg2, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-      printf(message, arg1, arg2);
-    }  else if(status.MPI_TAG == DEBUG_MESSAGE_4_TAG) {
-      MPI_Recv(&arg1, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-      MPI_Recv(&arg2, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-      MPI_Recv(&arg3, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-      printf(message, arg1, arg2, arg3);
-    } else if(status.MPI_TAG == JOB_DONE_TAG) {
-      printf("\nI've heard that slave %d finished its job.", sender);
-      job_finished_count++;
-      printf("\nJobs finished: %d", job_finished_count);
-    }
+    int sender, arg1, arg2, arg3, arg4, arg5, arg6, message_length, message_exists;
+    MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
 
-    printf("\n");
-    free(message);
+    sender = status.MPI_SOURCE;
+    if(message_exists) {
+      if(is_debug_tag(status.MPI_TAG)) {
+        char* message = malloc(100 * sizeof(char));
+        MPI_Recv(message, 100, MPI_CHAR, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+        MPI_Get_count(&status, MPI_CHAR, &message_length);
+        *(message + message_length) = '\0';
+        printf("[%d] ", sender);
+        if(status.MPI_TAG == DEBUG_MESSAGE_1_TAG) {
+          printf("%s", message);
+        } else if(status.MPI_TAG == DEBUG_MESSAGE_2_TAG) {
+          MPI_Recv(&arg1, 1, MPI_INT, sender, DEBUG_MESSAGE_FOLLOWUP_TAG, MPI_COMM_WORLD, &status);
+          printf(message, arg1);
+        } else if(status.MPI_TAG == DEBUG_MESSAGE_3_TAG) {
+          MPI_Recv(&arg1, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+          MPI_Recv(&arg2, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+          printf(message, arg1, arg2);
+        } else if(status.MPI_TAG == DEBUG_MESSAGE_4_TAG) {
+          MPI_Recv(&arg1, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+          MPI_Recv(&arg2, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+          MPI_Recv(&arg3, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+          printf(message, arg1, arg2, arg3);
+        }
+        printf("\n");
+        free(message);
+      } else if(status.MPI_TAG == JOB_DONE_TAG) {
+        int slice_arr_length;
+        /* MPI_Get_count(&status, MPI_INT, &count); */
+        MPI_Recv(&slice_arr_length, 1, MPI_INT, sender, JOB_DONE_TAG, MPI_COMM_WORLD, &status);
+        printf("Length: %d\n", slice_arr_length);
+        int* slice_arr = malloc(sizeof(int) * slice_arr_length);
+        MPI_Recv(slice_arr, slice_arr_length, MPI_INT, sender, FOLLOWING_JOB_DONE_TAG, MPI_COMM_WORLD, &status);
+        printf("I've heard that slave %d finished its job, here is its array:\n", sender);
+        for(int i = 0; i < slice_arr_length; i++) {
+          printf("%d ", *(slice_arr + i));
+        }
+        printf("\n");
+        job_finished_count++;
+        printf("Jobs finished: %d\n", job_finished_count);
+      }
+
+    }
   }
 }
 
@@ -332,6 +349,10 @@ void slave() {
   int** smoothened_slice = (int**)malloc(col_count * sizeof(int*));
   for(int col = 0; col < col_count; col++) {
     *(smoothened_slice + col) = (int*)malloc(row_count * sizeof(int));
+    for(int row = 0; row < row_count; row++) {
+      debug_3("Setting (%d, %d)", &row, &col, &rank);
+      *(*(smoothened_slice + col) + row) = 0;
+    }
   }
 
   // Setting starting and ending points based on slice types
@@ -407,7 +428,7 @@ void slave() {
       /* Sending point data */
       MPI_Send(points, 3, MPI_INT, demander_source, (50 + demander_source), MPI_COMM_WORLD);
 
-    } else { // Send point information according to the message
+    } else { // Do your own job
       if(job_finished) continue;
       debug_3("Processing (%d, %d)", &curr_x, &curr_y, &rank);
 
@@ -418,11 +439,27 @@ void slave() {
         if(curr_y == end_y - 1) {
           job_finished = true;
           /* Informing master that my job is done */
-          int temp;
+          int slice_size = row_count * col_count;
           debug_1("My job is done here", &rank);
-          MPI_Send(&temp, 1, MPI_INT, 0, JOB_DONE_TAG, MPI_COMM_WORLD);
+          MPI_Send(&slice_size, 1, MPI_INT, 0, JOB_DONE_TAG, MPI_COMM_WORLD);
+          printf("\n%d %d %d %d %d %d\n%d %d %d %d %d %d\n",
+            *(*(smoothened_slice + 0) + 0),
+            *(*(smoothened_slice + 1) + 0),
+            *(*(smoothened_slice + 2) + 0),
+            *(*(smoothened_slice + 3) + 0),
+            *(*(smoothened_slice + 4) + 0),
+            *(*(smoothened_slice + 5) + 0),
+            *(*(smoothened_slice + 0) + 1),
+            *(*(smoothened_slice + 1) + 1),
+            *(*(smoothened_slice + 2) + 1),
+            *(*(smoothened_slice + 3) + 1),
+            *(*(smoothened_slice + 4) + 1),
+            *(*(smoothened_slice + 5) + 1)
+          );
+          int* slice = serialize_slice(smoothened_slice, row_count, col_count);
+          MPI_Send(slice, row_count * col_count, MPI_INT, 0, FOLLOWING_JOB_DONE_TAG, MPI_COMM_WORLD);
         } else {
-          curr_x = 0;
+          curr_x = 1;
           curr_y++;
         }
       } else {  // Do your own job
@@ -461,9 +498,11 @@ void slave() {
           debug_1("Continuing...", &rank);
           continue;
         }
+        /* debug_4("(%d, %d) TOTAL: %d", &curr_x, &curr_y, &total, &rank); */
+        *(*(smoothened_slice + curr_x) + curr_y) = total;
+        debug_4("Assigned value %d to (%d, %d)\n", *(smoothened_slice + curr_x) + curr_y, &curr_x, &curr_y, &rank);
         curr_x++;
       }
-
     }
   }
 }

@@ -1,10 +1,8 @@
 #include "slice.h"
 #include <stdlib.h>
+#include <stdio.h>
 
-/**
- * Splits image into given sizes and returns serialized version of the slice in given index.
- */
-int* get_slice(int** image, int image_size, int image_slice_size, int index) {
+int* extract_slice(int** image, int image_size, int image_slice_size, int index) {
   // We are keeping slice as contiguous mamory because it'll be passed via MPI
   int* slice = (int*)malloc(sizeof(int) * image_slice_size * image_size);
   for(int row = index * image_slice_size; row < (index + 1) * image_slice_size; row++) {
@@ -15,10 +13,6 @@ int* get_slice(int** image, int image_size, int image_slice_size, int index) {
   return slice;
 }
 
-
-/**
- * Given an array, forms a row_count to col_count matrix based on it,
- */
 int** deserialize_slice(int* slice, int row_count, int col_count) {
   // Allocating space for new slice
   int** new_slice = (int**)malloc(col_count * sizeof(int*));
@@ -35,4 +29,17 @@ int** deserialize_slice(int* slice, int row_count, int col_count) {
 
   free(slice);
   return new_slice;
+}
+
+int* serialize_slice(int** slice, int row_count, int col_count) {
+  int* flat_slice = (int*)malloc(sizeof(int) * row_count * col_count);
+  for(int row = 0; row < row_count; row++) {
+    for(int col = 0; col < col_count; col++) {
+      int num = *(*(slice + col) + row);
+      printf("Value for (%d, %d) is %d\n", row, col, num);
+      *(flat_slice + col_count * row + col) = num;    
+    }
+  }
+
+  return flat_slice;
 }
