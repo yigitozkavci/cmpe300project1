@@ -13,7 +13,7 @@
 #define SLICE_TYPE_MIDDLE 2 /* Meaning slice is neither at the top or bottom. */
 #define SLICE_TYPE_BOTTOM 3 /* Meaning slice is at the very bottom. */
 
-#define IMAGE_SIZE 6
+#define IMAGE_SIZE 200
 
 /**********************************************************************
  * Reads the input and makes a matrix out of it.
@@ -23,7 +23,7 @@ int** image_from_input() {
   for(int i = 0; i < IMAGE_SIZE; i++) {
     *(image + i) = (int*)malloc(sizeof(int) * IMAGE_SIZE);
   }
-  FILE* file = fopen("input2.txt", "r");
+  FILE* file = fopen("input.txt", "r");
   for(int i = 0; i < IMAGE_SIZE; i++) {
     for(int j = 0; j < IMAGE_SIZE; j++) {
       int val;
@@ -165,12 +165,24 @@ void master() {
       MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
       if(!message_exists && job_finished_count == proc_size - 1) {
         printf("Smoothing is completed.\n");
-        /* int temp; */
-        /* MPI_Request request; */
-        /* MPI_Isend(&temp, 1, MPI_INT, job_to_finish, FINISH_SMOOTHING_TAG, MPI_COMM_WORLD, &request); */
+        int temp;
+        MPI_Request request;
+        MPI_Isend(&temp, 1, MPI_INT, job_to_finish, FINISH_SMOOTHING_TAG, MPI_COMM_WORLD, &request);
         job_to_finish++;
         continue;
       }
+    } else {
+      printf("Master is finished!\n\n\n");
+      FILE *f;
+      f = fopen("out.txt", "w");
+      for(int row = 0; row < IMAGE_SIZE; row++) {
+        for(int col = 0; col < IMAGE_SIZE; col++) {
+          fprintf(f, "%d ", *(*(new_image + col) + row));
+        }
+        fprintf(f, "\n");
+      }
+      fprintf(f, "\n");
+      break;
     }
 
     int sender, arg1, arg2, arg3, message_length, message_exists;
@@ -223,13 +235,6 @@ void master() {
             *(*(new_image + col) + row + slice_row_offset) = arr_val;
           }
         }
-        for(int row = 0; row < IMAGE_SIZE; row++) {
-          for(int col = 0; col < IMAGE_SIZE; col++) {
-            printf("%d ", *(*(new_image + col) + row));
-          }
-          printf("\n");
-        }
-        printf("\n");
         job_finished_count++;
       }
     }

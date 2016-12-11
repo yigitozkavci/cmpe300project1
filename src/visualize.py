@@ -19,14 +19,14 @@ isTxtToImg = 1;
 #########################
 # Takes "input.txt" and shows the image representation
 # of the 2D array
-files = ['original', 'smooth', 'binary']
 if isTxtToImg:
+    files = ["out", "input"]
     for file in files:
         if not os.path.isfile(file + '.txt'):
-            continue 
-	data = np.loadtxt(file + '.txt')
-	svimg = Image.fromarray(data.astype('uint8'))
-	svimg.show()
+            print("File not found")
+        data = np.loadtxt(file + '.txt')
+        svimg = Image.fromarray(data.astype('uint8'))
+        svimg.show()
 else:
     #########################
     ### From image to txt ###
