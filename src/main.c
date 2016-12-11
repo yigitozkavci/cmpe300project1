@@ -153,7 +153,21 @@ void master() {
   }
 
   // Listening for debug messages and printing them
+  int job_to_finish = 1;
+  MPI_Request request;
+  int message_exists;
+  int job_finished_count = 0;
   for(;;) {
+    if(job_to_finish == proc_size) break;
+    MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
+    if(!message_exists && job_finished_count == proc_size - 1) {
+      printf("Smoothing is completed.\n");
+      int temp;
+      MPI_Isend(&temp, 1, MPI_INT, job_to_finish, FINISH_SMOOTHING_TAG, MPI_COMM_WORLD, &request);
+      job_to_finish++;
+      continue;
+    }
+
     char* message = malloc(100 * sizeof(char));
     int sender, arg1, arg2, arg3, message_length;
     MPI_Recv(message, 100, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
@@ -176,7 +190,9 @@ void master() {
       MPI_Recv(&arg3, 1, MPI_INT, sender, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
       printf(message, arg1, arg2, arg3);
     } else if(status.MPI_TAG == JOB_DONE_TAG) {
-      debug_2("I've heard that slave %d finished its job.", &sender, &rank);
+      printf("\nI've heard that slave %d finished its job.", sender);
+      job_finished_count++;
+      printf("\nJobs finished: %d", job_finished_count);
     }
 
     printf("\n");
@@ -350,7 +366,13 @@ void slave() {
     someone_need_me = status.MPI_TAG == DEMAND_DATA_FROM_UPPER_SLICE_TAG
                    || status.MPI_TAG == DEMAND_DATA_FROM_LOWER_SLICE_TAG;
     
+    if(status.MPI_TAG == FINISH_SMOOTHING_TAG) {
+      printf("Slave is returning.\n");
+      return;
+    }
+
     if(message_exists && someone_need_me) {
+      debug_1("Message exists!", &rank);
 
       /*
        * Receiving message. We already know that we have a message
@@ -381,8 +403,6 @@ void slave() {
       for(int i = x_index - 1; i <= x_index + 1; i++) {
         *(points + i - x_index + 1) = *(*(slice_matrix + y_index) + i);
       }
-
-      /* debug_2("4 am sending this row to process %d", &demander_source, &rank); */
 
       /* Sending point data */
       MPI_Send(points, 3, MPI_INT, demander_source, (50 + demander_source), MPI_COMM_WORLD);
@@ -455,10 +475,12 @@ int main(int argc, char* argv[]) {
 
   if(rank == 0) {
     master();
+    printf("Master is finished.\n");
   } else {
     slave();
+    printf("Slave is finished.\n");
   }
 
+  printf("Finalizing\n");
   MPI_Finalize();
-  return 0;
 }
