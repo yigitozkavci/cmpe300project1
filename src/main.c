@@ -361,7 +361,6 @@ void slave() {
   MPI_Recv(&slice_type, 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 
   slice_matrix = deserialize_slice(slice, row_count, col_count);
-  /* free_matrix_i(slice_matrix, col_count); */
 
   // Starting smoothing process. After smoothing each point, slave is checking whether
   // there is a message from other slaves
@@ -410,6 +409,10 @@ void slave() {
                    || status.MPI_TAG == DEMAND_DATA_FROM_LOWER_SLICE_TAG;
 
     if(status.MPI_TAG == FINISH_SMOOTHING_TAG) {
+      for(int row = 0; row < row_count; row++) {
+         free(*(slice_matrix + row)); 
+      }
+      free(slice_matrix);
       printf("Slave is returning.\n");
       return;
     }
@@ -460,20 +463,6 @@ void slave() {
           /* Informing master that my job is done */
           int slice_size = row_count * col_count;
           MPI_Send(&slice_size, 1, MPI_INT, 0, JOB_DONE_TAG, MPI_COMM_WORLD);
-          /* printf("\n%d %d %d %d %d %d\n%d %d %d %d %d %d\n", */
-          /*   *(*(smoothened_slice + 0) + 0), */
-          /*   *(*(smoothened_slice + 1) + 0), */
-          /*   *(*(smoothened_slice + 2) + 0), */
-          /*   *(*(smoothened_slice + 3) + 0), */
-          /*   *(*(smoothened_slice + 4) + 0), */
-          /*   *(*(smoothened_slice + 5) + 0), */
-          /*   *(*(smoothened_slice + 0) + 1), */
-          /*   *(*(smoothened_slice + 1) + 1), */
-          /*   *(*(smoothened_slice + 2) + 1), */
-          /*   *(*(smoothened_slice + 3) + 1), */
-          /*   *(*(smoothened_slice + 4) + 1), */
-          /*   *(*(smoothened_slice + 5) + 1) */
-          /* ); */
           int* slice = serialize_slice(smoothened_slice, row_count, col_count);
           MPI_Send(slice, row_count * col_count, MPI_INT, 0, FOLLOWING_JOB_DONE_TAG, MPI_COMM_WORLD);
         } else {
