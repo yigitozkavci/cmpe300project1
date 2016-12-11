@@ -13,21 +13,19 @@
 #define SLICE_TYPE_MIDDLE 2 /* Meaning slice is neither at the top or bottom. */
 #define SLICE_TYPE_BOTTOM 3 /* Meaning slice is at the very bottom. */
 
-const int image_size = 6;
-const int smooth_image_size = image_size - 2;
-const int binary_image_size = smooth_image_size - 2;
+#define IMAGE_SIZE 6
 
 /**********************************************************************
  * Reads the input and makes a matrix out of it.
  **********************************************************************/
 int** image_from_input() {
-  int** image = (int**)malloc(sizeof(int*) * image_size);
-  for(int i = 0; i < image_size; i++) {
-    *(image + i) = (int*)malloc(sizeof(int) * image_size);
+  int** image = (int**)malloc(sizeof(int*) * IMAGE_SIZE);
+  for(int i = 0; i < IMAGE_SIZE; i++) {
+    *(image + i) = (int*)malloc(sizeof(int) * IMAGE_SIZE);
   }
   FILE* file = fopen("input2.txt", "r");
-  for(int i = 0; i < image_size; i++) {
-    for(int j = 0; j < image_size; j++) {
+  for(int i = 0; i < IMAGE_SIZE; i++) {
+    for(int j = 0; j < IMAGE_SIZE; j++) {
       int val;
       fscanf(file, "%d", &val);
       *(*(image + j) + i) = val;
@@ -124,14 +122,14 @@ void master() {
   MPI_Comm_size(MPI_COMM_WORLD, &proc_size);
 
   int** image = image_from_input();
-  int image_slice_size = image_size * image_size / (proc_size - 1);
+  int image_slice_size = IMAGE_SIZE * IMAGE_SIZE / (proc_size - 1);
   int image_slice_type;
 
   // Giving slaves their slices of image
   for(rank = 1; rank < proc_size; rank++) {
-    int* image_slice = extract_slice(image, image_size, image_slice_size/image_size, rank - 1);
+    int* image_slice = extract_slice(image, IMAGE_SIZE, image_slice_size/IMAGE_SIZE, rank - 1);
     MPI_Send(&image_slice_size, 1, MPI_INT, rank, SLICE_SIZE_TAG, MPI_COMM_WORLD);
-    *(image_slice + image_slice_size) = image_size;
+    *(image_slice + image_slice_size) = IMAGE_SIZE;
     MPI_Send(image_slice, image_slice_size + 1, MPI_INT, rank, SLICE_TAG, MPI_COMM_WORLD);
     if(rank == 1) {
       image_slice_type = SLICE_TYPE_TOP;
@@ -143,7 +141,7 @@ void master() {
     MPI_Send(&image_slice_type, 1, MPI_INT, rank, SLICE_TYPE_TAG, MPI_COMM_WORLD);
   }
 
-  for(int i = 0; i < image_size; i++) {
+  for(int i = 0; i < IMAGE_SIZE; i++) {
     free(*(image + i));
   }
   free(image);
@@ -154,10 +152,10 @@ void master() {
   int job_finished_count = 0;
 
   /* Allocating space for the new smoothened image. */
-  int** new_image = (int**)malloc(sizeof(int*) * image_size);
-  for(int i = 0; i < image_size; i++) {
-    *(new_image + i) = (int*)malloc(sizeof(int) * image_size);
-    for(int j = 0; j < image_size; j++) {
+  int** new_image = (int**)malloc(sizeof(int*) * IMAGE_SIZE);
+  for(int i = 0; i < IMAGE_SIZE; i++) {
+    *(new_image + i) = (int*)malloc(sizeof(int) * IMAGE_SIZE);
+    for(int j = 0; j < IMAGE_SIZE; j++) {
       *(*(new_image + i) + j) = 0;
     }
   }
@@ -167,10 +165,15 @@ void master() {
       MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
       if(!message_exists && job_finished_count == proc_size - 1) {
         printf("Smoothing is completed.\n");
-        /* MPI_Isend(&temp, 1, MPI_INT, job_to_finish, FINISH_SMOOTHING_TAG, MPI_COMM_WORLD, &request); */
+        int temp;
+        MPI_Request request;
+        MPI_Isend(&temp, 1, MPI_INT, job_to_finish, FINISH_SMOOTHING_TAG, MPI_COMM_WORLD, &request);
         job_to_finish++;
         continue;
       }
+    } else {
+      printf("WOW\n");
+      return;
     }
 
     int sender, arg1, arg2, arg3, message_length, message_exists;
@@ -214,8 +217,8 @@ void master() {
 
         printf("I've heard that slave %d finished its job, here is the result:\n", sender);
         /* Putting that serialized slice array to new_image. */
-        int slice_row_count = image_size / (proc_size - 1);
-        int slice_col_count = image_size;
+        int slice_row_count = IMAGE_SIZE / (proc_size - 1);
+        int slice_col_count = IMAGE_SIZE;
         for(int row = 0; row < slice_row_count; row++) {
           for(int col = 0; col < slice_col_count; col++) {
             int slice_row_offset = (sender - 1) * slice_row_count;
@@ -223,8 +226,8 @@ void master() {
             *(*(new_image + col) + row + slice_row_offset) = arr_val;
           }
         }
-        for(int row = 0; row < image_size; row++) {
-          for(int col = 0; col < image_size; col++) {
+        for(int row = 0; row < IMAGE_SIZE; row++) {
+          for(int col = 0; col < IMAGE_SIZE; col++) {
             printf("%d ", *(*(new_image + col) + row));
           }
           printf("\n");
