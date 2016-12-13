@@ -1,5 +1,5 @@
-#include <stdio.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include "matrix.h"
 #include "mpi.h"
 #include <stdbool.h>
@@ -7,11 +7,7 @@
 #include "tag_types.h"
 #include "debug.h"
 #include "slice.h"
-
-/* There are 3 types of slices: */
-#define SLICE_TYPE_TOP 1    /* Meaning slice is at the very top. */
-#define SLICE_TYPE_MIDDLE 2 /* Meaning slice is neither at the top or bottom. */
-#define SLICE_TYPE_BOTTOM 3 /* Meaning slice is at the very bottom. */
+#include "util.h"
 
 #define IMAGE_SIZE 200
 
@@ -367,36 +363,14 @@ void slave() {
 
   slice_matrix = deserialize_slice(slice, row_count, col_count);
 
+  int** smoothened_slice = util_alloc_matrix(row_count, col_count);
+
   // Starting smoothing process. After smoothing each point, slave is checking whether
   // there is a message from other slaves
   int start_x, start_y;                   // Starting point of slice processing
   int end_x, end_y;                       // Ending point of slice processing (exclusive)
-
-  // Allocating space for our smoothened_slice
-  int** smoothened_slice = (int**)malloc(col_count * sizeof(int*));
-  for(int col = 0; col < col_count; col++) {
-    *(smoothened_slice + col) = (int*)malloc(row_count * sizeof(int));
-    for(int row = 0; row < row_count; row++) {
-      *(*(smoothened_slice + col) + row) = 0;
-    }
-  }
-
-  // Setting starting and ending points based on slice types
-  start_x = 1;           // Horizontal starting and ending points are the
-  end_x = col_count - 1; // same for every slice type
-  if(slice_type == SLICE_TYPE_MIDDLE) {
-    start_y = 0;
-    end_y = row_count;
-  } else if(slice_type == SLICE_TYPE_TOP) {
-    start_y = 1;
-    end_y = row_count;
-  } else if(slice_type == SLICE_TYPE_BOTTOM) {
-    start_y = 0;
-    end_y = row_count - 1;
-  } else {
-    debug_2("Wrong slice type: %d", &slice_type, &rank);
-    exit(0);
-  }
+  int stage = STAGE_SMOOTHING;
+  util_decide_starting_position(slice_type, row_count, col_count, stage, &start_x, &start_y, &end_x, &end_y);
 
   // Starting smoothing job
   int curr_x = start_x, curr_y = start_y; // Current point of slice processing
@@ -405,53 +379,40 @@ void slave() {
   bool is_demanded = false;
   bool someone_need_me;
   bool should_continue;
-  for(;;) {
 
+  for(;;) {
     /* If any of other slave wants demands a point, they send messages.
      * Here, we check whether another slave demands point data from us. */
     MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
-    someone_need_me = status.MPI_TAG == DEMAND_DATA_FROM_UPPER_SLICE_TAG
-                   || status.MPI_TAG == DEMAND_DATA_FROM_LOWER_SLICE_TAG;
 
     if(status.MPI_TAG == FINISH_SMOOTHING_TAG) {
       for(int row = 0; row < row_count; row++) {
          free(*(slice_matrix + row)); 
       }
       free(slice_matrix);
-      printf("Slave is returning.\n");
+      printf("Finished smoothing. Starting thresholding.");
+      stage = STAGE_THRESHOLDING;
+      util_decide_starting_position(slice_type, row_count, col_count, stage, &start_x, &start_y, &end_x, &end_y);
+      /* continue; */
+      return;
+    } else if(status.MPI_TAG == FINISH_THRESHOLDING_TAG) {
+      printf("Finished thresholding. Returning...");
       return;
     }
 
+    someone_need_me = status.MPI_TAG == DEMAND_DATA_FROM_UPPER_SLICE_TAG
+                      || status.MPI_TAG == DEMAND_DATA_FROM_LOWER_SLICE_TAG;
     if(message_exists && someone_need_me) {
-
       /*
        * Receiving message. We already know that we have a message
        * from probe above.
        */
-      int x_index, y_index;
-      int demander_source;
+      int x_index, demander_source;
       MPI_Recv(&x_index, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
       demander_source = status.MPI_SOURCE;
 
-      /*
-       * Determining y-index based on demand type of data.
-       * Slaves can demand data from either higher or lower rows.
-       */
-      if(status.MPI_TAG == DEMAND_DATA_FROM_UPPER_SLICE_TAG) {
-        y_index = end_y - 1;
-      } else if(status.MPI_TAG == DEMAND_DATA_FROM_LOWER_SLICE_TAG) {
-        y_index = 0;
-      } else {
-        printf("[!] Wrong tag: %d\n", status.MPI_TAG);
-        exit(0);
-      }
 
-      /* Writing point data to send */
-      int *points = malloc(sizeof(int) * 3);
-      for(int i = x_index - 1; i <= x_index + 1; i++) {
-        *(points + i - x_index + 1) = *(*(slice_matrix + y_index) + i);
-      }
-
+      int* points = util_prepare_points_for_demander(slice_matrix, x_index, status.MPI_TAG, end_y);
       /* Sending point data */
       MPI_Send(points, 3, MPI_INT, demander_source, (50 + demander_source), MPI_COMM_WORLD);
       free(points);
@@ -479,32 +440,8 @@ void slave() {
         bool is_low_row = curr_y == end_y - 1;
         bool is_high_row = curr_y == start_y;
         int total;
-        int special_row;
 
-        if(slice_type == SLICE_TYPE_TOP) {
-          if(is_low_row) {
-            special_row = 3;
-          } else {
-            special_row = 0;
-          }
-        } else if(slice_type == SLICE_TYPE_MIDDLE) {
-          if(is_high_row) {
-            special_row = 1;
-          } else if(is_low_row) {
-            special_row = 3;
-          } else {
-            special_row = 0;
-          }
-        } else if(slice_type == SLICE_TYPE_BOTTOM) {
-          if(is_high_row) {
-            special_row = 1;
-          } else {
-            special_row = 0;
-          }
-        } else {
-          printf("Wrong slice type: %d", slice_type);
-          exit(0);
-        }
+        int special_row = util_determine_special_row(slice_type, is_low_row, is_high_row);
 
         process_rows_for_smoothing(slice_matrix, curr_x, curr_y, special_row,
                                    &is_demanded, &should_continue, &total, &rank);
