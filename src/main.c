@@ -151,15 +151,9 @@ void master() {
   bool thresholding_jobs_sent = false;
 
 
-  /* Allocating space for the new smoothened image. */
-  int** new_image = (int**)malloc(sizeof(int*) * IMAGE_SIZE);
-  for(int i = 0; i < IMAGE_SIZE; i++) {
-    *(new_image + i) = (int*)malloc(sizeof(int) * IMAGE_SIZE);
-    
-    for(int j = 0; j < IMAGE_SIZE; j++) {
-      *(*(new_image + i) + j) = 0;
-    }
-  }
+  /* Allocating space for the new smoothened and thresholded image. */
+  int** master_smoothened_image = util_alloc_matrix(IMAGE_SIZE, IMAGE_SIZE);
+  int** master_thresholded_image = util_alloc_matrix(IMAGE_SIZE, IMAGE_SIZE);
 
   /**********************************************************************
    * What happens here is this:
@@ -181,10 +175,19 @@ void master() {
     if(job_to_finish == proc_size) {
       printf("Master is finished!\n\n\n");
       FILE *f;
-      f = fopen("out.txt", "w");
+      f = fopen("smoothened.txt", "w");
       for(int row = 0; row < IMAGE_SIZE; row++) {
         for(int col = 0; col < IMAGE_SIZE; col++) {
-          fprintf(f, "%d ", *(*(new_image + col) + row));
+          fprintf(f, "%d ", *(*(master_smoothened_image + col) + row));
+        }
+        fprintf(f, "\n");
+      }
+      fprintf(f, "\n");
+
+      f = fopen("thresholded.txt", "w");
+      for(int row = 0; row < IMAGE_SIZE; row++) {
+        for(int col = 0; col < IMAGE_SIZE; col++) {
+          fprintf(f, "%d ", *(*(master_thresholded_image + col) + row));
         }
         fprintf(f, "\n");
       }
@@ -260,14 +263,14 @@ void master() {
 
         printf("I've heard that slave %d finished its job, here is the result:\n", sender);
 
-        /* Putting that serialized slice array to new_image. */
+        /* Putting that serialized slice array to master_smoothened_image. */
         int slice_row_count = IMAGE_SIZE / (proc_size - 1);
         int slice_col_count = IMAGE_SIZE;
         for(int row = 0; row < slice_row_count; row++) {
           for(int col = 0; col < slice_col_count; col++) {
             int slice_row_offset = (sender - 1) * slice_row_count;
             int arr_val = *(slice_arr + row * slice_col_count + col);
-            *(*(new_image + col) + row + slice_row_offset) = arr_val;
+            *(*(master_smoothened_image + col) + row + slice_row_offset) = arr_val;
           }
         }
         smoothing_finished_count++;
@@ -282,16 +285,16 @@ void master() {
 
         printf("I've heard that slave %d finished its thresholding, here is the result:\n", sender);
 
-        /* Putting that serialized slice array to new_image. */
-        /* int slice_row_count = IMAGE_SIZE / (proc_size - 1); */
-        /* int slice_col_count = IMAGE_SIZE; */
-        /* for(int row = 0; row < slice_row_count; row++) { */
-        /*   for(int col = 0; col < slice_col_count; col++) { */
-        /*     int slice_row_offset = (sender - 1) * slice_row_count; */
-        /*     int arr_val = *(slice_arr + row * slice_col_count + col); */
-        /*     *(*(new_image + col) + row + slice_row_offset) = arr_val; */
-        /*   } */
-        /* } */
+        /* Putting that serialized slice array to master_thresholded_image. */
+        int slice_row_count = IMAGE_SIZE / (proc_size - 1);
+        int slice_col_count = IMAGE_SIZE;
+        for(int row = 0; row < slice_row_count; row++) {
+          for(int col = 0; col < slice_col_count; col++) {
+            int slice_row_offset = (sender - 1) * slice_row_count;
+            int arr_val = *(slice_arr + row * slice_col_count + col);
+            *(*(master_thresholded_image + col) + row + slice_row_offset) = arr_val;
+          }
+        }
         thresholding_finished_count++;
       }
     }
@@ -425,6 +428,7 @@ void slave() {
   slice_matrix = deserialize_slice(slice, row_count, col_count);
 
   int** smoothened_slice = util_alloc_matrix(row_count, col_count);
+  int** thresholded_slice = util_alloc_matrix(row_count, col_count);
 
   // Starting smoothing process. After smoothing each point, slave is checking whether
   // there is a message from other slaves
@@ -472,7 +476,7 @@ void slave() {
         job_finished = false; // Work work work work work
         continue;
       } else if(status.MPI_TAG == FINISH_THRESHOLDING_TAG) {
-        printf("Finished thresholding. Returning...");
+        debug_1("Finished thresholding. Returning...", &rank);
         return;
       } else if(someone_need_me) {
         int x_index = message_data;
@@ -529,14 +533,17 @@ void slave() {
             /* Informing master that my job is done */
             int slice_size = row_count * col_count;
             MPI_Send(&slice_size, 1, MPI_INT, 0, THRESHOLDING_DONE_TAG, MPI_COMM_WORLD);
-            int* slice = serialize_slice(smoothened_slice, row_count, col_count);
+            int* slice = serialize_slice(thresholded_slice, row_count, col_count);
             MPI_Send(slice, row_count * col_count, MPI_INT, 0, FOLLOWING_THRESHOLDING_DONE_TAG, MPI_COMM_WORLD);
           } else {
             curr_x = 2;
             curr_y++;
           }
         } else {
-          /* debug_1("Working on thresholding...", &rank); */
+          /* debug_3("Working on thresholding: (%d, %d)", &curr_x, &curr_y, &rank); */
+          int total = 120;
+          *(*(thresholded_slice + curr_x) + curr_y) = total;
+
           curr_x++;
         }
       }
@@ -551,7 +558,7 @@ int main(int argc, char* argv[]) {
 
   if(rank == 0) {
     master();
-    printf("Master is finished.\n");
+    /* printf("Master is finished.\n"); */
   } else {
     slave();
     printf("Slave is finished.\n");
