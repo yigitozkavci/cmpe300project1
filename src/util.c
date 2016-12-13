@@ -5,6 +5,7 @@ void util_decide_starting_position(
   int row_count,
   int col_count,
   int stage,
+  int is_slice_alone,
   int* start_x,
   int* start_y,
   int* end_x,
@@ -37,13 +38,22 @@ void util_decide_starting_position(
       *end_y = row_count;
     } else if(slice_type == SLICE_TYPE_BOTTOM) {
       *start_y = 0;
-      *end_y = row_count - 1;
+      *end_y = row_count - 2;
     } else {
       printf("Wrong slice type: %d", slice_type);
       exit(0);
     }
   } else {
     printf("Wrong stage type: %d", stage);
+  }
+  if(is_slice_alone == 1) {
+    if(stage == STAGE_SMOOTHING) {
+      *start_y = 1;
+      *end_y = row_count - 1;
+    } else if(stage == STAGE_THRESHOLDING) {
+      *start_y = 2;
+      *end_y = row_count - 2;
+    }
   }
 }
 

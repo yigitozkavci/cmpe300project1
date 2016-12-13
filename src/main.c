@@ -15,7 +15,7 @@ const int obl_plus45_ld[3][3] =  { { -1, -1, 2 }, { -1, 2, -1 }, { 2, -1, -1} };
 const int obl_minus45_ld[3][3] = { { 2, -1, -1 }, { -1, 2, -1 }, { -1, -1, 2} };
 
 #define IMAGE_SIZE 200
-#define THRESHOLD 50
+#define THRESHOLD 10
 
 /**********************************************************************
  * Reads the input and makes a matrix out of it.
@@ -152,17 +152,23 @@ void master() {
   int image_slice_type;
 
   // Giving slaves their slices of image
+  int is_slave_alone = (proc_size == 2) ? 1 : 0;
   for(rank = 1; rank < proc_size; rank++) {
+    MPI_Send(&is_slave_alone, 1, MPI_INT, rank, SLICE_SIZE_TAG, MPI_COMM_WORLD);
     int* image_slice = extract_slice(image, IMAGE_SIZE, image_slice_size/IMAGE_SIZE, rank - 1);
     MPI_Send(&image_slice_size, 1, MPI_INT, rank, SLICE_SIZE_TAG, MPI_COMM_WORLD);
     *(image_slice + image_slice_size) = IMAGE_SIZE;
     MPI_Send(image_slice, image_slice_size + 1, MPI_INT, rank, SLICE_TAG, MPI_COMM_WORLD);
-    if(rank == 1) {
-      image_slice_type = SLICE_TYPE_TOP;
-    } else if(rank == proc_size - 1) {
-      image_slice_type = SLICE_TYPE_BOTTOM;
-    } else {
+    if(is_slave_alone) {
       image_slice_type = SLICE_TYPE_MIDDLE;
+    } else {
+      if(rank == 1) {
+        image_slice_type = SLICE_TYPE_TOP;
+      } else if(rank == proc_size - 1) {
+        image_slice_type = SLICE_TYPE_BOTTOM;
+      } else {
+        image_slice_type = SLICE_TYPE_MIDDLE;
+      }
     }
     MPI_Send(&image_slice_type, 1, MPI_INT, rank, SLICE_TYPE_TAG, MPI_COMM_WORLD);
   }
@@ -428,7 +434,7 @@ void process_rows_for_smoothing(
 }
 
 void process_rows_for_thresholding(
-  int** slice_matrix,    /* Matrix that this slave is responsible of. */
+  int** smoothened_slice,    /* Matrix that this slave is responsible of. */
 
   int curr_x,            /* Current X position that this slave
                             is processing. */
@@ -472,18 +478,18 @@ void process_rows_for_thresholding(
   if(special_row == 1) {
     row_1 = malloc(sizeof(int) * 3);
     demand_result = demand_point_data(&curr_x, *rank, row_1, 'u', is_demanded);
-    row_3 = *(slice_matrix + curr_y + 1) + curr_x - 1;
+    row_3 = *(smoothened_slice + curr_y + 1) + curr_x - 1;
   } else if(special_row == 3) {
     row_3 = malloc(sizeof(int) * 3);
     demand_result = demand_point_data(&curr_x, *rank, row_3, 'l', is_demanded);
-    row_1 = *(slice_matrix + curr_y - 1) + curr_x - 1;
+    row_1 = *(smoothened_slice + curr_y - 1) + curr_x - 1;
   } else {
-    row_1 = *(slice_matrix + curr_y - 1) + curr_x - 1;
-    row_3 = *(slice_matrix + curr_y + 1) + curr_x - 1;
+    row_1 = *(smoothened_slice + curr_y - 1) + curr_x - 1;
+    row_3 = *(smoothened_slice + curr_y + 1) + curr_x - 1;
   }
 
 
-  row_2 = *(slice_matrix + curr_y) + curr_x - 1;
+  row_2 = *(smoothened_slice + curr_y) + curr_x - 1;
 
   if(used_demand && demand_result == false) {
     *should_continue = true;
@@ -508,9 +514,13 @@ void slave() {
   int rank, slice_size, slice_type, row_count, col_count;
   int* slice;         // Slice that this slave is going to work on. It's an array.
   int** slice_matrix; // We are receiving slice as an array but then deserializing it to matrix.
+  int i_am_alone;
 
   // Setting rank
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+  // Receiving information that if I am alone or not
+  MPI_Recv(&i_am_alone, 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 
   // Receiving slice size
   MPI_Recv(&slice_size, 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
@@ -538,7 +548,7 @@ void slave() {
   int start_x, start_y;                   // Starting point of slice processing
   int end_x, end_y;                       // Ending point of slice processing (exclusive)
   int stage = STAGE_SMOOTHING;
-  util_decide_starting_position(slice_type, row_count, col_count, stage, &start_x, &start_y, &end_x, &end_y);
+  util_decide_starting_position(slice_type, row_count, col_count, stage, i_am_alone, &start_x, &start_y, &end_x, &end_y);
 
   // Starting smoothing job
   int curr_x = start_x, curr_y = start_y; // Current point of slice processing
@@ -563,23 +573,23 @@ void slave() {
 
       if(status.MPI_TAG == FINISH_SMOOTHING_TAG) {
         debug_1("Freeing slice matrix", &rank);
-        /* for(int row = 0; row < row_count; row++) { */
-        /*    free(*(slice_matrix + row)); */ 
-        /* } */
-        /* free(slice_matrix); */
         debug_1("Finished smoothing. Waiting until further information.", &rank);
         job_finished = true;
         continue;
       } else if(status.MPI_TAG == START_THRESHOLDING_TAG) {
         debug_1("I am starting thresholding...", &rank);
         stage = STAGE_THRESHOLDING;
-        util_decide_starting_position(slice_type, row_count, col_count, stage, &start_x, &start_y, &end_x, &end_y);
+        util_decide_starting_position(slice_type, row_count, col_count, stage, i_am_alone, &start_x, &start_y, &end_x, &end_y);
         curr_x = start_x;
         curr_y = start_y;
         job_finished = false; // Work work work work work
         continue;
       } else if(status.MPI_TAG == FINISH_THRESHOLDING_TAG) {
         debug_1("Finished thresholding. Returning...", &rank);
+        for(int row = 0; row < row_count; row++) {
+           free(*(slice_matrix + row)); 
+        }
+        free(slice_matrix);
         return;
       } else if(someone_need_me) {
         int x_index = message_data;
@@ -588,7 +598,7 @@ void slave() {
         int* points = util_prepare_points_for_demander(slice_matrix, x_index, status.MPI_TAG, end_y);
         /* Sending point data */
         MPI_Send(points, 3, MPI_INT, demander_source, (50 + demander_source), MPI_COMM_WORLD);
-        free(points);
+        /* free(points); */
       } else {
         debug_1("Received an unidentified message, there is something wrong!", &rank);
         exit(0);
@@ -615,9 +625,13 @@ void slave() {
 
           bool is_low_row = curr_y == end_y - 1;
           bool is_high_row = curr_y == start_y;
-          int total;
+          int total, special_row;
 
-          int special_row = util_determine_special_row(slice_type, is_low_row, is_high_row);
+          if(i_am_alone) {
+            special_row = 0;
+          } else {
+            special_row = util_determine_special_row(slice_type, is_low_row, is_high_row);
+          }
 
           process_rows_for_smoothing(slice_matrix, curr_x, curr_y, special_row,
                                      &is_demanded, &should_continue, &total, &rank);
@@ -648,15 +662,21 @@ void slave() {
           bool is_high_row = curr_y == start_y;
           int total;
 
-          int special_row = util_determine_special_row(slice_type, is_low_row, is_high_row);
+          int special_row;
+          if(i_am_alone) {
+            special_row = 0;
+          } else {
+            special_row = util_determine_special_row(slice_type, is_low_row, is_high_row);
+          }
 
-          process_rows_for_thresholding(slice_matrix, curr_x, curr_y, special_row,
+
+          process_rows_for_thresholding(smoothened_slice, curr_x, curr_y, special_row,
                                         &is_demanded, &should_continue, &total, &rank);
 
           if(should_continue) {
             continue;
           }
-          *(*(thresholded_slice + curr_x) + curr_y) = total;
+          *(*(thresholded_slice + curr_y) + curr_x) = total;
 
           curr_x++;
         }

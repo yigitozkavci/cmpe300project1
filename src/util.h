@@ -23,13 +23,14 @@
  **********************************************************************/
 void util_decide_starting_position(
   int slice_type, /* Type of the slice. It can take 3 values, which are defined above this file. */
-  int row_count, /* Row count of slice matrix. */
-  int col_count, /* Column count of slice matrix. */ 
-  int stage,     /* Stage can be whether SMOOTHING or THRESHOLDING. */
-  int* start_x,  /* X dimension of starting point. */
-  int* start_y,  /* Y dimension of starting point. */
-  int* end_x,    /* X dimension of ending point. */
-  int* end_y     /* Y dimension of ending point. */
+  int row_count,      /* Row count of slice matrix. */
+  int col_count,      /* Column count of slice matrix. */ 
+  int stage,          /* Stage can be whether SMOOTHING or THRESHOLDING. */
+  int is_slice_alone, /* Stage can be whether SMOOTHING or THRESHOLDING. */
+  int* start_x,       /* X dimension of starting point. */
+  int* start_y,       /* Y dimension of starting point. */
+  int* end_x,         /* X dimension of ending point. */
+  int* end_y          /* Y dimension of ending point. */
 );
 
 /**********************************************************************
