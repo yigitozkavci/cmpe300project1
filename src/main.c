@@ -144,30 +144,41 @@ void master() {
 
   // Listening for debug messages and printing them
   int job_to_finish = 1;
+  int smoothing_job_to_finish = 1;
   int message_exists;
-  int job_finished_count = 0;
+  int smoothing_finished_count = 0;
+  int thresholding_finished_count = 0;
+  bool thresholding_jobs_sent = false;
+
 
   /* Allocating space for the new smoothened image. */
   int** new_image = (int**)malloc(sizeof(int*) * IMAGE_SIZE);
   for(int i = 0; i < IMAGE_SIZE; i++) {
     *(new_image + i) = (int*)malloc(sizeof(int) * IMAGE_SIZE);
+    
     for(int j = 0; j < IMAGE_SIZE; j++) {
       *(*(new_image + i) + j) = 0;
     }
   }
 
+  /**********************************************************************
+   * What happens here is this:
+   *
+   * Master has 2 main jobs that it needs to perform infinitely:
+   * - If receives a debug message, prints it.
+   * - If a slave informs master about job complete, it master takes act  accordingly.
+   *   - If slave completes a SMOOTHING stage, master increases
+   *     smoothing_finished_count. If this count equals to slave count, this
+   *     means that master needs to transmit stage of all slaves from
+   *     SMOOTHING to THRESHOLDING.
+   *   - If a slave completes a THRESHOLDING stage, master increases
+   *     thresholding_finished_count. If this count equals to slave count, this
+   *     means that master needs to send JOB_DONE to all slaves, which kills
+   *     their processes.
+   *     
+   **********************************************************************/
   for(;;) {
-    if(job_to_finish != proc_size) {
-      MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
-      if(!message_exists && job_finished_count == proc_size - 1) {
-        printf("Smoothing is completed.\n");
-        int temp;
-        MPI_Request request;
-        MPI_Isend(&temp, 1, MPI_INT, job_to_finish, FINISH_SMOOTHING_TAG, MPI_COMM_WORLD, &request);
-        job_to_finish++;
-        continue;
-      }
-    } else {
+    if(job_to_finish == proc_size) {
       printf("Master is finished!\n\n\n");
       FILE *f;
       f = fopen("out.txt", "w");
@@ -179,6 +190,33 @@ void master() {
       }
       fprintf(f, "\n");
       break;
+    } else if(smoothing_job_to_finish == proc_size && !thresholding_jobs_sent) {
+      printf("All smoothing jobs are finished. Sending START_THRESHOLDING_TAG to all\n");
+      int temp;
+      MPI_Request request;
+      for(int i = 1; i < proc_size; i++) {
+
+        printf("Sending START_THRESHOLDING_TAG to %d\n", i);
+        MPI_Isend(&temp, 1, MPI_INT, i, START_THRESHOLDING_TAG, MPI_COMM_WORLD, &request);
+      }
+      thresholding_jobs_sent = true;
+    } else {
+      MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
+      if(!message_exists && thresholding_finished_count == proc_size - 1) {
+        printf("Thresholding is completed.\n");
+        int temp;
+        MPI_Request request;
+        MPI_Isend(&temp, 1, MPI_INT, job_to_finish, FINISH_THRESHOLDING_TAG, MPI_COMM_WORLD, &request);
+        job_to_finish++;
+        continue;
+      } else if(!message_exists && smoothing_finished_count == proc_size - 1 && !thresholding_jobs_sent) {
+        printf("Smoothing is completed for slave %d.\n", smoothing_job_to_finish);
+        int temp;
+        MPI_Request request;
+        MPI_Isend(&temp, 1, MPI_INT, smoothing_job_to_finish, FINISH_SMOOTHING_TAG, MPI_COMM_WORLD, &request);
+        smoothing_job_to_finish++;
+        continue;
+      }
     }
 
     int sender, arg1, arg2, arg3, message_length, message_exists;
@@ -211,16 +249,17 @@ void master() {
         }
         printf("\n");
         free(message);
-      } else if(status.MPI_TAG == JOB_DONE_TAG) {
+      } else if(status.MPI_TAG == SMOOTHING_DONE_TAG) {
         /* Receiving slice array length from slave */
         int slice_arr_length;
-        MPI_Recv(&slice_arr_length, 1, MPI_INT, sender, JOB_DONE_TAG, MPI_COMM_WORLD, &status);
+        MPI_Recv(&slice_arr_length, 1, MPI_INT, sender, SMOOTHING_DONE_TAG, MPI_COMM_WORLD, &status);
 
         /* Receiving deserialized slice array from slave */
         int* slice_arr = malloc(sizeof(int) * slice_arr_length);
-        MPI_Recv(slice_arr, slice_arr_length, MPI_INT, sender, FOLLOWING_JOB_DONE_TAG, MPI_COMM_WORLD, &status);
+        MPI_Recv(slice_arr, slice_arr_length, MPI_INT, sender, FOLLOWING_SMOOTHING_DONE_TAG, MPI_COMM_WORLD, &status);
 
         printf("I've heard that slave %d finished its job, here is the result:\n", sender);
+
         /* Putting that serialized slice array to new_image. */
         int slice_row_count = IMAGE_SIZE / (proc_size - 1);
         int slice_col_count = IMAGE_SIZE;
@@ -231,7 +270,29 @@ void master() {
             *(*(new_image + col) + row + slice_row_offset) = arr_val;
           }
         }
-        job_finished_count++;
+        smoothing_finished_count++;
+      } else if(status.MPI_TAG == THRESHOLDING_DONE_TAG) {
+        /* Receiving slice array length from slave */
+        int slice_arr_length;
+        MPI_Recv(&slice_arr_length, 1, MPI_INT, sender, THRESHOLDING_DONE_TAG, MPI_COMM_WORLD, &status);
+
+        /* Receiving deserialized slice array from slave */
+        int* slice_arr = malloc(sizeof(int) * slice_arr_length);
+        MPI_Recv(slice_arr, slice_arr_length, MPI_INT, sender, FOLLOWING_THRESHOLDING_DONE_TAG, MPI_COMM_WORLD, &status);
+
+        printf("I've heard that slave %d finished its thresholding, here is the result:\n", sender);
+
+        /* Putting that serialized slice array to new_image. */
+        /* int slice_row_count = IMAGE_SIZE / (proc_size - 1); */
+        /* int slice_col_count = IMAGE_SIZE; */
+        /* for(int row = 0; row < slice_row_count; row++) { */
+        /*   for(int col = 0; col < slice_col_count; col++) { */
+        /*     int slice_row_offset = (sender - 1) * slice_row_count; */
+        /*     int arr_val = *(slice_arr + row * slice_col_count + col); */
+        /*     *(*(new_image + col) + row + slice_row_offset) = arr_val; */
+        /*   } */
+        /* } */
+        thresholding_finished_count++;
       }
     }
   }
@@ -384,73 +445,100 @@ void slave() {
     /* If any of other slave wants demands a point, they send messages.
      * Here, we check whether another slave demands point data from us. */
     MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
-
-    if(status.MPI_TAG == FINISH_SMOOTHING_TAG) {
-      for(int row = 0; row < row_count; row++) {
-         free(*(slice_matrix + row)); 
-      }
-      free(slice_matrix);
-      printf("Finished smoothing. Starting thresholding.");
-      stage = STAGE_THRESHOLDING;
-      util_decide_starting_position(slice_type, row_count, col_count, stage, &start_x, &start_y, &end_x, &end_y);
-      /* continue; */
-      return;
-    } else if(status.MPI_TAG == FINISH_THRESHOLDING_TAG) {
-      printf("Finished thresholding. Returning...");
-      return;
-    }
-
     someone_need_me = status.MPI_TAG == DEMAND_DATA_FROM_UPPER_SLICE_TAG
                       || status.MPI_TAG == DEMAND_DATA_FROM_LOWER_SLICE_TAG;
-    if(message_exists && someone_need_me) {
-      /*
-       * Receiving message. We already know that we have a message
-       * from probe above.
-       */
-      int x_index, demander_source;
-      MPI_Recv(&x_index, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-      demander_source = status.MPI_SOURCE;
 
+    if(message_exists) {
+      int message_size, message_data, message_source;
+      MPI_Get_count(&status, MPI_INT, &message_size);
+      MPI_Recv(&message_data, message_size, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+      message_source = status.MPI_SOURCE;
 
-      int* points = util_prepare_points_for_demander(slice_matrix, x_index, status.MPI_TAG, end_y);
-      /* Sending point data */
-      MPI_Send(points, 3, MPI_INT, demander_source, (50 + demander_source), MPI_COMM_WORLD);
-      free(points);
+      if(status.MPI_TAG == FINISH_SMOOTHING_TAG) {
+        debug_1("Freeing slice matrix", &rank);
+        for(int row = 0; row < row_count; row++) {
+           free(*(slice_matrix + row)); 
+        }
+        free(slice_matrix);
+        debug_1("Finished smoothing. Waiting until further information.", &rank);
+        job_finished = true;
+        continue;
+      } else if(status.MPI_TAG == START_THRESHOLDING_TAG) {
+        debug_1("I am starting thresholding...", &rank);
+        stage = STAGE_THRESHOLDING;
+        util_decide_starting_position(slice_type, row_count, col_count, stage, &start_x, &start_y, &end_x, &end_y);
+        curr_x = start_x;
+        curr_y = start_y;
+        job_finished = false; // Work work work work work
+        continue;
+      } else if(status.MPI_TAG == FINISH_THRESHOLDING_TAG) {
+        printf("Finished thresholding. Returning...");
+        return;
+      } else if(someone_need_me) {
+        int x_index = message_data;
+        int demander_source = message_source;
 
+        int* points = util_prepare_points_for_demander(slice_matrix, x_index, status.MPI_TAG, end_y);
+        /* Sending point data */
+        MPI_Send(points, 3, MPI_INT, demander_source, (50 + demander_source), MPI_COMM_WORLD);
+        free(points);
+      } else {
+        debug_1("Received an unidentified message, there is something wrong!", &rank);
+        exit(0);
+      }
     } else { // Do your own job
       if(job_finished) continue;
+      if(stage == STAGE_SMOOTHING) {
+        /*
+         * Checking boundary conditions where we need to rearrange position
+         */
+        if(curr_x == end_x) {
+          if(curr_y == end_y - 1) {
+            /* Informing master that my job is done */
+            int slice_size = row_count * col_count;
+            MPI_Send(&slice_size, 1, MPI_INT, 0, SMOOTHING_DONE_TAG, MPI_COMM_WORLD);
+            int* slice = serialize_slice(smoothened_slice, row_count, col_count);
+            MPI_Send(slice, row_count * col_count, MPI_INT, 0, FOLLOWING_SMOOTHING_DONE_TAG, MPI_COMM_WORLD);
+            job_finished = true;
+          } else {
+            curr_x = 1;
+            curr_y++;
+          }
+        } else {  // Do your own job
 
-      /*
-       * Checking boundary conditions where we need to rearrange position
-       */
-      if(curr_x == end_x) {
-        if(curr_y == end_y - 1) {
-          job_finished = true;
-          /* Informing master that my job is done */
-          int slice_size = row_count * col_count;
-          MPI_Send(&slice_size, 1, MPI_INT, 0, JOB_DONE_TAG, MPI_COMM_WORLD);
-          int* slice = serialize_slice(smoothened_slice, row_count, col_count);
-          MPI_Send(slice, row_count * col_count, MPI_INT, 0, FOLLOWING_JOB_DONE_TAG, MPI_COMM_WORLD);
+          bool is_low_row = curr_y == end_y - 1;
+          bool is_high_row = curr_y == start_y;
+          int total;
+
+          int special_row = util_determine_special_row(slice_type, is_low_row, is_high_row);
+
+          process_rows_for_smoothing(slice_matrix, curr_x, curr_y, special_row,
+                                     &is_demanded, &should_continue, &total, &rank);
+
+          if(should_continue) {
+            continue;
+          }
+          *(*(smoothened_slice + curr_x) + curr_y) = total;
+          curr_x++;
+        }
+      } else if(stage == STAGE_THRESHOLDING) {
+        /* debug_4("Processing (%d, %d), end_x = %d", &curr_x, &curr_y, &end_x, &rank); */
+        if(curr_x == end_x) {
+          if(curr_y == end_y - 1) {
+            job_finished = true;
+            /* Informing master that my job is done */
+            int slice_size = row_count * col_count;
+            MPI_Send(&slice_size, 1, MPI_INT, 0, THRESHOLDING_DONE_TAG, MPI_COMM_WORLD);
+            int* slice = serialize_slice(smoothened_slice, row_count, col_count);
+            MPI_Send(slice, row_count * col_count, MPI_INT, 0, FOLLOWING_THRESHOLDING_DONE_TAG, MPI_COMM_WORLD);
+          } else {
+            curr_x = 2;
+            curr_y++;
+          }
         } else {
-          curr_x = 1;
-          curr_y++;
+          /* debug_1("Working on thresholding...", &rank); */
+          curr_x++;
         }
-      } else {  // Do your own job
-
-        bool is_low_row = curr_y == end_y - 1;
-        bool is_high_row = curr_y == start_y;
-        int total;
-
-        int special_row = util_determine_special_row(slice_type, is_low_row, is_high_row);
-
-        process_rows_for_smoothing(slice_matrix, curr_x, curr_y, special_row,
-                                   &is_demanded, &should_continue, &total, &rank);
-
-        if(should_continue) {
-          continue;
-        }
-        *(*(smoothened_slice + curr_x) + curr_y) = total;
-        curr_x++;
       }
     }
   }
