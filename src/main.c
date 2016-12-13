@@ -9,7 +9,13 @@
 #include "slice.h"
 #include "util.h"
 
+const int horizontal_ld[3][3] =  { { -1, -1, -1 }, { 2, 2, 2 }, { -1, -1, -1} };
+const int vertical_ld[3][3] =    { { -1, 2, -1 }, { -1, 2, -1 }, { -1, 2, -1} };
+const int obl_plus45_ld[3][3] =  { { -1, -1, 2 }, { -1, 2, -1 }, { 2, -1, -1} };
+const int obl_minus45_ld[3][3] = { { 2, -1, -1 }, { -1, 2, -1 }, { -1, -1, 2} };
+
 #define IMAGE_SIZE 200
+#define THRESHOLD 50
 
 /**********************************************************************
  * Reads the input and makes a matrix out of it.
@@ -29,6 +35,30 @@ int** image_from_input() {
   }
   fclose(file);
   return image;
+}
+
+/**********************************************************************
+ * In order to threshold a point, we need 3 rows.
+ *
+ * row_1: starting address of row 1
+ * row_2: starting address of row 2
+ * row_3: starting address of row 3
+ **********************************************************************/
+int threshold_point(int* row_1, int* row_2, int* row_3, int* rank) {
+  int res[4] = { 0, 0, 0, 0 };
+  for(int i = 0; i < 3; i++) {
+    res[0] += *(row_1 + i) * horizontal_ld[0][i] + *(row_2 + i) * horizontal_ld[1][i] + *(row_3 + i) * horizontal_ld[2][i];
+    res[1] += *(row_1 + i) * vertical_ld[0][i] + *(row_2 + i) * vertical_ld[1][i] + *(row_3 + i) * vertical_ld[2][i];
+    res[2] += *(row_1 + i) * obl_plus45_ld[0][i] + *(row_2 + i) * obl_plus45_ld[1][i] + *(row_3 + i) * obl_plus45_ld[2][i];
+    res[3] += *(row_1 + i) * obl_minus45_ld[0][i] + *(row_2 + i) * obl_minus45_ld[1][i] + *(row_3 + i) * obl_minus45_ld[2][i];
+  }
+  /* bool over_threshold = false; */
+  for(int i = 0; i < 4; i++) {
+    if(res[i] > THRESHOLD) {
+      return 255;
+    }
+  }
+  return 0;
 }
 
 /**********************************************************************
@@ -397,6 +427,79 @@ void process_rows_for_smoothing(
   }
 }
 
+void process_rows_for_thresholding(
+  int** slice_matrix,    /* Matrix that this slave is responsible of. */
+
+  int curr_x,            /* Current X position that this slave
+                            is processing. */
+
+  int curr_y,            /* Current Y position that this slave is
+                            processing. */
+
+  int special_row,       /* Row that we want from other slaves. This can
+                            be 1, 3 or 0 (if there is no need). */
+
+  bool* is_demanded,     /* This boolean keeps track of whether a slave
+                            already sent its message demanding point
+                            data. This is just to prevent deadlock. */
+
+  bool* should_continue, /* Continue here is the actual `continue`
+                            statement. Indicates whether caller method
+                            should use continue afterwards. */
+
+  int* total,            /* Result of smoothing process. */
+
+  int* rank               /* Rank of the slave calling this method */
+) {
+
+  /* Validation */
+  if(special_row != 0 && special_row != 1 && special_row != 3) {
+    debug_1("WRONG SPECIAL WRONG IS PASSED!", rank);
+    exit(0);
+  }
+
+  int *row_1, *row_2, *row_3; /* These rows will be used for smoothing. */
+
+  bool demand_result; /* Here, this variable is very important. `demand_point_data`
+                         returns false if some other slave requested data from us
+                         while we want to demand data. So we return from that
+                         stage and fulfill that slave's demand. */
+
+  bool used_demand = (special_row != 0);  /* If special row is 1 or 3, we should
+                                               demand some data from other slaves. */
+
+
+  if(special_row == 1) {
+    row_1 = malloc(sizeof(int) * 3);
+    demand_result = demand_point_data(&curr_x, *rank, row_1, 'u', is_demanded);
+    row_3 = *(slice_matrix + curr_y + 1) + curr_x - 1;
+  } else if(special_row == 3) {
+    row_3 = malloc(sizeof(int) * 3);
+    demand_result = demand_point_data(&curr_x, *rank, row_3, 'l', is_demanded);
+    row_1 = *(slice_matrix + curr_y - 1) + curr_x - 1;
+  } else {
+    row_1 = *(slice_matrix + curr_y - 1) + curr_x - 1;
+    row_3 = *(slice_matrix + curr_y + 1) + curr_x - 1;
+  }
+
+
+  row_2 = *(slice_matrix + curr_y) + curr_x - 1;
+
+  if(used_demand && demand_result == false) {
+    *should_continue = true;
+  } else {
+    *should_continue = false;
+    *is_demanded = false;
+  }
+
+  *total = threshold_point(row_1, row_2, row_3, rank);
+  if(special_row == 1) {
+    free(row_1);
+  } else if(special_row == 3) {
+    free(row_3);
+  }
+}
+
 /**********************************************************************
  * Slave process
  **********************************************************************/
@@ -460,10 +563,10 @@ void slave() {
 
       if(status.MPI_TAG == FINISH_SMOOTHING_TAG) {
         debug_1("Freeing slice matrix", &rank);
-        for(int row = 0; row < row_count; row++) {
-           free(*(slice_matrix + row)); 
-        }
-        free(slice_matrix);
+        /* for(int row = 0; row < row_count; row++) { */
+        /*    free(*(slice_matrix + row)); */ 
+        /* } */
+        /* free(slice_matrix); */
         debug_1("Finished smoothing. Waiting until further information.", &rank);
         job_finished = true;
         continue;
@@ -541,7 +644,18 @@ void slave() {
           }
         } else {
           /* debug_3("Working on thresholding: (%d, %d)", &curr_x, &curr_y, &rank); */
-          int total = 120;
+          bool is_low_row = curr_y == end_y - 1;
+          bool is_high_row = curr_y == start_y;
+          int total;
+
+          int special_row = util_determine_special_row(slice_type, is_low_row, is_high_row);
+
+          process_rows_for_thresholding(slice_matrix, curr_x, curr_y, special_row,
+                                        &is_demanded, &should_continue, &total, &rank);
+
+          if(should_continue) {
+            continue;
+          }
           *(*(thresholded_slice + curr_x) + curr_y) = total;
 
           curr_x++;
