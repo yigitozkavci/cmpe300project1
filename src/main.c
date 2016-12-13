@@ -477,19 +477,19 @@ void process_rows_for_thresholding(
 
   if(special_row == 1) {
     row_1 = malloc(sizeof(int) * 3);
-    demand_result = demand_point_data(&curr_x, *rank, row_1, 'u', is_demanded);
-    row_3 = *(smoothened_slice + curr_y + 1) + curr_x - 1;
+    demand_result = demand_point_data(&curr_y, *rank, row_1, 'u', is_demanded);
+    row_3 = *(smoothened_slice + curr_x + 1) + curr_y - 1;
   } else if(special_row == 3) {
     row_3 = malloc(sizeof(int) * 3);
-    demand_result = demand_point_data(&curr_x, *rank, row_3, 'l', is_demanded);
-    row_1 = *(smoothened_slice + curr_y - 1) + curr_x - 1;
+    demand_result = demand_point_data(&curr_y, *rank, row_3, 'l', is_demanded);
+    row_1 = *(smoothened_slice + curr_x - 1) + curr_y - 1;
   } else {
-    row_1 = *(smoothened_slice + curr_y - 1) + curr_x - 1;
-    row_3 = *(smoothened_slice + curr_y + 1) + curr_x - 1;
+    row_1 = *(smoothened_slice + curr_x - 1) + curr_y - 1;
+    row_3 = *(smoothened_slice + curr_x + 1) + curr_y - 1;
   }
 
 
-  row_2 = *(smoothened_slice + curr_y) + curr_x - 1;
+  row_2 = *(smoothened_slice + curr_x) + curr_y - 1;
 
   if(used_demand && demand_result == false) {
     *should_continue = true;
@@ -595,7 +595,12 @@ void slave() {
         int x_index = message_data;
         int demander_source = message_source;
 
-        int* points = util_prepare_points_for_demander(slice_matrix, x_index, status.MPI_TAG, end_y);
+        int* points;
+        if(stage == STAGE_SMOOTHING) {
+          points = util_prepare_points_for_demander(slice_matrix, x_index, status.MPI_TAG, end_y, stage);
+        } else {
+          points = util_prepare_points_for_demander(smoothened_slice, x_index, status.MPI_TAG, end_y, stage);
+        }
         /* Sending point data */
         MPI_Send(points, 3, MPI_INT, demander_source, (50 + demander_source), MPI_COMM_WORLD);
         /* free(points); */
@@ -676,7 +681,7 @@ void slave() {
           if(should_continue) {
             continue;
           }
-          *(*(thresholded_slice + curr_y) + curr_x) = total;
+          *(*(thresholded_slice + curr_x) + curr_y) = total;
 
           curr_x++;
         }

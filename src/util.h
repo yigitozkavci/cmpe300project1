@@ -50,7 +50,7 @@ int** util_alloc_matrix(
  * Tag is used to determine whether information is demanded from top
  * or bottom. If bottom, this method also needs to know end_y.
  **********************************************************************/
-int* util_prepare_points_for_demander(int** slice_matrix, int x_index, int tag, int end_y);
+int* util_prepare_points_for_demander(int** slice_matrix, int x_index, int tag, int end_y, int stage);
 
 /**********************************************************************
  * Special row is the row of which took data from another slice.

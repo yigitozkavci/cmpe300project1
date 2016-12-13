@@ -69,7 +69,7 @@ int** util_alloc_matrix(int row_count, int col_count) {
   return result;
 }
 
-int* util_prepare_points_for_demander(int** slice_matrix, int x_index, int tag, int end_y) {
+int* util_prepare_points_for_demander(int** slice_matrix, int x_index, int tag, int end_y, int stage) {
   int y_index;
   /*
    * Determining y-index based on demand type of data.
@@ -85,11 +85,21 @@ int* util_prepare_points_for_demander(int** slice_matrix, int x_index, int tag, 
   }
 
   /* Writing point data to send */
-  int *points = malloc(sizeof(int) * 3);
-  for(int i = x_index - 1; i <= x_index + 1; i++) {
-    *(points + i - x_index + 1) = *(*(slice_matrix + y_index) + i);
+  int* points;
+  if(stage == STAGE_SMOOTHING) {
+    points = malloc(sizeof(int) * 3);
+    for(int i = x_index - 1; i <= x_index + 1; i++) {
+      *(points + i - x_index + 1) = *(*(slice_matrix + y_index) + i);
+    }
+  } else {
+    points = malloc(sizeof(int) * 3);
+    for(int i = x_index - 1; i <= x_index + 1; i++) {
+      *(points + i - x_index + 1) = 120;// *(*(slice_matrix + y_index) + i);
+    }
   }
 
+
+  printf("Sending %d %d %d\n", *points, *(points + 1), *(points + 2));
   return points;
 }
 
