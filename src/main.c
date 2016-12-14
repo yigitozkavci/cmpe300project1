@@ -81,6 +81,7 @@ int smoothen_point(int* row_1, int* row_2, int* row_3, int* rank) {
  * Demands data of three points from either top or bottom slice.
  **********************************************************************/
 bool demand_point_data(int* curr_x, int rank, int* received_vals, char type, bool* is_demanded) {
+  /* debug_2("I want point data for index %d", curr_x, &rank); */
   MPI_Status status;
   int send_tag;
   int remote_rank;
@@ -129,6 +130,7 @@ bool demand_point_data(int* curr_x, int rank, int* received_vals, char type, boo
     &status         /* status */
   );
 
+  printf("Received these vals: %d %d %d\n", *received_vals, *(received_vals + 1), *(received_vals + 2));
   return true;
 }
 
@@ -464,7 +466,7 @@ void process_rows_for_thresholding(
     exit(0);
   }
 
-  int *row_1, *row_2, *row_3; /* These rows will be used for smoothing. */
+  int *row_1, *row_2, *row_3, *received; /* These rows will be used for smoothing. */
 
   bool demand_result; /* Here, this variable is very important. `demand_point_data`
                          returns false if some other slave requested data from us
@@ -475,14 +477,17 @@ void process_rows_for_thresholding(
                                                demand some data from other slaves. */
 
 
+  debug_2("Entering with special row %d", &special_row, rank);
   if(special_row == 1) {
-    row_1 = malloc(sizeof(int) * 3);
-    demand_result = demand_point_data(&curr_y, *rank, row_1, 'u', is_demanded);
+    received = malloc(sizeof(int) * 3);
+    demand_result = demand_point_data(&curr_x, *rank, received, 'u', is_demanded);
+    row_1 = *(smoothened_slice + curr_x - 1) + curr_y - 1;
     row_3 = *(smoothened_slice + curr_x + 1) + curr_y - 1;
   } else if(special_row == 3) {
-    row_3 = malloc(sizeof(int) * 3);
-    demand_result = demand_point_data(&curr_y, *rank, row_3, 'l', is_demanded);
+    received = malloc(sizeof(int) * 3);
+    demand_result = demand_point_data(&curr_x, *rank, received, 'l', is_demanded);
     row_1 = *(smoothened_slice + curr_x - 1) + curr_y - 1;
+    row_3 = *(smoothened_slice + curr_x + 1) + curr_y - 1;
   } else {
     row_1 = *(smoothened_slice + curr_x - 1) + curr_y - 1;
     row_3 = *(smoothened_slice + curr_x + 1) + curr_y - 1;
@@ -491,6 +496,8 @@ void process_rows_for_thresholding(
 
   row_2 = *(smoothened_slice + curr_x) + curr_y - 1;
 
+
+  
   if(used_demand && demand_result == false) {
     *should_continue = true;
   } else {
@@ -498,12 +505,29 @@ void process_rows_for_thresholding(
     *is_demanded = false;
   }
 
-  *total = threshold_point(row_1, row_2, row_3, rank);
+  debug_2("Starting secret part with special row %d", &special_row, rank);
+  /* Skip here. Here is a mess. Kan görüyorum hocam. */
   if(special_row == 1) {
-    free(row_1);
+    *(row_1 + 0) = *(received + 0);
+    *(row_2 + 0) = *(received + 1);
+    *(row_3 + 0) = *(received + 2);
   } else if(special_row == 3) {
-    free(row_3);
+    *(row_1 + 2) = *(received + 0);
+    *(row_2 + 2) = *(received + 1);
+    *(row_3 + 2) = *(received + 2);
   }
+  debug_1("Ending secret part", rank);
+  /**/
+
+  debug_4("Row 1: %d %d %d", row_1, row_1 + 1, row_1 + 2, rank);
+  debug_4("Row 2: %d %d %d", row_2, row_2 + 1, row_2 + 2, rank);
+  debug_4("Row 3: %d %d %d\n", row_3, row_3 + 1, row_3 + 2, rank);
+  *total = threshold_point(row_1, row_2, row_3, rank);
+  /* if(special_row == 1) { */
+  /*   free(row_1); */
+  /* } else if(special_row == 3) { */
+  /*   free(row_3); */
+  /* } */
 }
 
 /**********************************************************************
@@ -596,6 +620,7 @@ void slave() {
         int demander_source = message_source;
 
         int* points;
+        /* debug_2("I give points for index %d", &x_index, &rank); */
         if(stage == STAGE_SMOOTHING) {
           points = util_prepare_points_for_demander(slice_matrix, x_index, status.MPI_TAG, end_y, stage);
         } else {

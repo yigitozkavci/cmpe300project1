@@ -94,12 +94,12 @@ int* util_prepare_points_for_demander(int** slice_matrix, int x_index, int tag, 
   } else {
     points = malloc(sizeof(int) * 3);
     for(int i = x_index - 1; i <= x_index + 1; i++) {
-      *(points + i - x_index + 1) = 120;// *(*(slice_matrix + y_index) + i);
+      *(points + i - x_index + 1) = *(*(slice_matrix + i) + y_index);
     }
   }
 
 
-  printf("Sending %d %d %d\n", *points, *(points + 1), *(points + 2));
+  /* printf("Sending %d %d %d\n", *points, *(points + 1), *(points + 2)); */
   return points;
 }
 
