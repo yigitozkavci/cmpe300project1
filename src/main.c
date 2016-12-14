@@ -435,6 +435,13 @@ void process_rows_for_smoothing(
   }
 }
 
+/**********************************************************************
+ * This is the worst code I have written in my life. Don't ever
+ * touch this function, here is what it does:
+ *
+ * It takes the current position and smoothened slice, and processes them
+ * for thresholding.
+ **********************************************************************/
 void process_rows_for_thresholding(
   int** smoothened_slice,    /* Matrix that this slave is responsible of. */
 
