@@ -20,7 +20,7 @@ isTxtToImg = 1;
 # Takes "input.txt" and shows the image representation
 # of the 2D array
 if isTxtToImg:
-    files = ["input", "smoothened", "thresholded", "out10"]
+    files = ["thresholded", "out10"]
     for file in files:
         if not os.path.isfile(file + '.txt'):
             print("File not found")

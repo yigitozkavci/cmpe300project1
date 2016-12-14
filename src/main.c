@@ -15,7 +15,9 @@ const int obl_plus45_ld[3][3] =  { { -1, -1, 2 }, { -1, 2, -1 }, { 2, -1, -1} };
 const int obl_minus45_ld[3][3] = { { 2, -1, -1 }, { -1, 2, -1 }, { -1, -1, 2} };
 
 #define IMAGE_SIZE 200
-#define THRESHOLD 10
+int THRESHOLD;
+char* INPUT_FILENAME;
+char* OUTPUT_FILENAME;
 
 /**********************************************************************
  * Reads the input and makes a matrix out of it.
@@ -25,7 +27,7 @@ int** image_from_input() {
   for(int i = 0; i < IMAGE_SIZE; i++) {
     *(image + i) = (int*)malloc(sizeof(int) * IMAGE_SIZE);
   }
-  FILE* file = fopen("input.txt", "r");
+  FILE* file = fopen(INPUT_FILENAME, "r");
   for(int i = 0; i < IMAGE_SIZE; i++) {
     for(int j = 0; j < IMAGE_SIZE; j++) {
       int val;
@@ -213,16 +215,16 @@ void master() {
     if(job_to_finish == proc_size) {
       printf("Master is finished!\n\n\n");
       FILE *f;
-      f = fopen("smoothened.txt", "w");
-      for(int row = 0; row < IMAGE_SIZE; row++) {
-        for(int col = 0; col < IMAGE_SIZE; col++) {
-          fprintf(f, "%d ", *(*(master_smoothened_image + col) + row));
-        }
-        fprintf(f, "\n");
-      }
-      fprintf(f, "\n");
+      /* f = fopen("smoothened.txt", "w"); */
+      /* for(int row = 0; row < IMAGE_SIZE; row++) { */
+      /*   for(int col = 0; col < IMAGE_SIZE; col++) { */
+      /*     fprintf(f, "%d ", *(*(master_smoothened_image + col) + row)); */
+      /*   } */
+      /*   fprintf(f, "\n"); */
+      /* } */
+      /* fprintf(f, "\n"); */
 
-      f = fopen("thresholded.txt", "w");
+      f = fopen(OUTPUT_FILENAME, "w");
       for(int row = 0; row < IMAGE_SIZE; row++) {
         for(int col = 0; col < IMAGE_SIZE; col++) {
           fprintf(f, "%d ", *(*(master_thresholded_image + col) + row));
@@ -739,8 +741,19 @@ void slave() {
 
 int main(int argc, char* argv[]) {
   int rank;
+
   MPI_Init(&argc, &argv);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+  if(argc != 4) {
+    if(rank == 0)
+      printf("Wrong input format, it should be:\nmpiexec -n <n_of_processors> <program> <in_file> <out_file> <threshold>\n");
+    exit(0);
+  }
+
+  INPUT_FILENAME = argv[1];
+  OUTPUT_FILENAME = argv[2];
+  THRESHOLD = atoi(argv[3]);
 
   if(rank == 0) {
     master();
