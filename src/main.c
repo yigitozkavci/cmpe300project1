@@ -13,7 +13,6 @@
 
 #include <stdlib.h>
 #include <stdio.h>
-#include "matrix.h"
 #include "mpi.h"
 #include <stdbool.h>
 #include "string.h"
