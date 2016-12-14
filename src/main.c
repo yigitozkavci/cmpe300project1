@@ -1,3 +1,16 @@
+/* Student Name: Yiğit Özkavcı
+ * Student Number: 2013400111
+ * Compile Status: Compiling
+ * Program Status: Working
+ *
+ * Notes:
+ * You can compile the code on any unix/linux platform with typing:
+ * $ make
+ *
+ * Then run with:
+ * $ mpiexec -n <n_of_processors> <program> <in_file> <out_file> <threshold>
+ */
+
 #include <stdlib.h>
 #include <stdio.h>
 #include "matrix.h"
@@ -83,7 +96,6 @@ int smoothen_point(int* row_1, int* row_2, int* row_3, int* rank) {
  * Demands data of three points from either top or bottom slice.
  **********************************************************************/
 bool demand_point_data(int* curr_x, int rank, int* received_vals, char type, bool* is_demanded) {
-  /* debug_2("I want point data for index %d", curr_x, &rank); */
   MPI_Status status;
   int send_tag;
   int remote_rank;
@@ -213,16 +225,8 @@ void master() {
    **********************************************************************/
   for(;;) {
     if(job_to_finish == proc_size) {
-      printf("Master is finished!\n\n\n");
+      printf("Thresholding is finished for all slaves.\n");
       FILE *f;
-      /* f = fopen("smoothened.txt", "w"); */
-      /* for(int row = 0; row < IMAGE_SIZE; row++) { */
-      /*   for(int col = 0; col < IMAGE_SIZE; col++) { */
-      /*     fprintf(f, "%d ", *(*(master_smoothened_image + col) + row)); */
-      /*   } */
-      /*   fprintf(f, "\n"); */
-      /* } */
-      /* fprintf(f, "\n"); */
 
       f = fopen(OUTPUT_FILENAME, "w");
       for(int row = 0; row < IMAGE_SIZE; row++) {
@@ -239,21 +243,18 @@ void master() {
       MPI_Request request;
       for(int i = 1; i < proc_size; i++) {
 
-        printf("Sending START_THRESHOLDING_TAG to %d\n", i);
         MPI_Isend(&temp, 1, MPI_INT, i, START_THRESHOLDING_TAG, MPI_COMM_WORLD, &request);
       }
       thresholding_jobs_sent = true;
     } else {
       MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &message_exists, &status);
       if(!message_exists && thresholding_finished_count == proc_size - 1) {
-        printf("Thresholding is completed.\n");
         int temp;
         MPI_Request request;
         MPI_Isend(&temp, 1, MPI_INT, job_to_finish, FINISH_THRESHOLDING_TAG, MPI_COMM_WORLD, &request);
         job_to_finish++;
         continue;
       } else if(!message_exists && smoothing_finished_count == proc_size - 1 && !thresholding_jobs_sent) {
-        printf("Smoothing is completed for slave %d.\n", smoothing_job_to_finish);
         int temp;
         MPI_Request request;
         MPI_Isend(&temp, 1, MPI_INT, smoothing_job_to_finish, FINISH_SMOOTHING_TAG, MPI_COMM_WORLD, &request);
@@ -301,8 +302,6 @@ void master() {
         int* slice_arr = malloc(sizeof(int) * slice_arr_length);
         MPI_Recv(slice_arr, slice_arr_length, MPI_INT, sender, FOLLOWING_SMOOTHING_DONE_TAG, MPI_COMM_WORLD, &status);
 
-        printf("I've heard that slave %d finished its job, here is the result:\n", sender);
-
         /* Putting that serialized slice array to master_smoothened_image. */
         int slice_row_count = IMAGE_SIZE / (proc_size - 1);
         int slice_col_count = IMAGE_SIZE;
@@ -322,8 +321,6 @@ void master() {
         /* Receiving deserialized slice array from slave */
         int* slice_arr = malloc(sizeof(int) * slice_arr_length);
         MPI_Recv(slice_arr, slice_arr_length, MPI_INT, sender, FOLLOWING_THRESHOLDING_DONE_TAG, MPI_COMM_WORLD, &status);
-
-        printf("I've heard that slave %d finished its thresholding, here is the result:\n", sender);
 
         /* Putting that serialized slice array to master_thresholded_image. */
         int slice_row_count = IMAGE_SIZE / (proc_size - 1);
@@ -489,9 +486,7 @@ void process_rows_for_thresholding(
                                                demand some data from other slaves. */
 
 
-  /* debug_2("Entering with special row %d", &special_row, rank); */
 
-  /* debug_2("Starting secret part with special row %d", &special_row, rank); */
   /* Skip here. Here is a mess. Kan görüyorum hocam. */
   if(special_row == 1) { /* All rows takes first address from demand result */
     received = malloc(sizeof(int) * 3);
@@ -536,12 +531,6 @@ void process_rows_for_thresholding(
     *(row_2 + 2) = *(*(smoothened_slice + curr_x) + curr_y + 1);
     *(row_3 + 2) = *(*(smoothened_slice + curr_x + 1) + curr_y + 1);
   }
-  /* debug_1("Ending secret part", rank); */
-  /**/
-
-  /* debug_4("Row 1: %d %d %d", row_1, row_1 + 1, row_1 + 2, rank); */
-  /* debug_4("Row 2: %d %d %d", row_2, row_2 + 1, row_2 + 2, rank); */
-  /* debug_4("Row 3: %d %d %d\n", row_3, row_3 + 1, row_3 + 2, rank); */
 
   *total = threshold_point(row_1, row_2, row_3, rank);
 
@@ -620,12 +609,9 @@ void slave() {
       message_source = status.MPI_SOURCE;
 
       if(status.MPI_TAG == FINISH_SMOOTHING_TAG) {
-        debug_1("Freeing slice matrix", &rank);
-        debug_1("Finished smoothing. Waiting until further information.", &rank);
         job_finished = true;
         continue;
       } else if(status.MPI_TAG == START_THRESHOLDING_TAG) {
-        debug_1("I am starting thresholding...", &rank);
         stage = STAGE_THRESHOLDING;
         util_decide_starting_position(slice_type, row_count, col_count, stage, i_am_alone, &start_x, &start_y, &end_x, &end_y);
         curr_x = start_x;
@@ -633,7 +619,6 @@ void slave() {
         job_finished = false; // Work work work work work
         continue;
       } else if(status.MPI_TAG == FINISH_THRESHOLDING_TAG) {
-        debug_1("Finished thresholding. Returning...", &rank);
         for(int row = 0; row < row_count; row++) {
            free(*(slice_matrix + row)); 
         }
@@ -644,7 +629,6 @@ void slave() {
         int demander_source = message_source;
 
         int* points;
-        /* debug_2("I give points for index %d", &x_index, &rank); */
         if(stage == STAGE_SMOOTHING) {
           points = util_prepare_points_for_demander(slice_matrix, x_index, status.MPI_TAG, end_y, stage);
         } else {
@@ -711,7 +695,6 @@ void slave() {
             curr_y++;
           }
         } else {
-          /* debug_3("Working on thresholding: (%d, %d)", &curr_x, &curr_y, &rank); */
           bool is_low_row = curr_y == end_y - 1;
           bool is_high_row = curr_y == start_y;
           int total;
