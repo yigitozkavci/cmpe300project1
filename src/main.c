@@ -143,7 +143,6 @@ bool demand_point_data(int* curr_x, int rank, int* received_vals, char type, boo
     &status         /* status */
   );
 
-  /* printf("Received these vals: %d %d %d\n", *received_vals, *(received_vals + 1), *(received_vals + 2)); */
   return true;
 }
 
@@ -484,9 +483,6 @@ void process_rows_for_thresholding(
   bool used_demand = (special_row != 0);  /* If special row is 1 or 3, we should
                                                demand some data from other slaves. */
 
-
-
-  /* Skip here. Here is a mess. Kan görüyorum hocam. */
   if(special_row == 1) { /* All rows takes first address from demand result */
     received = malloc(sizeof(int) * 3);
     demand_result = demand_point_data(&curr_x, *rank, received, 'u', is_demanded);
@@ -680,7 +676,6 @@ void slave() {
           curr_x++;
         }
       } else if(stage == STAGE_THRESHOLDING) {
-        /* debug_4("Processing (%d, %d), end_x = %d", &curr_x, &curr_y, &end_x, &rank); */
         if(curr_x == end_x) {
           if(curr_y == end_y - 1) {
             job_finished = true;
@@ -739,7 +734,6 @@ int main(int argc, char* argv[]) {
 
   if(rank == 0) {
     master();
-    /* printf("Master is finished.\n"); */
   } else {
     slave();
     printf("Slave is finished.\n");

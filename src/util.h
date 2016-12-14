@@ -7,7 +7,6 @@
 #include "tag_types.h"
 #include <stdbool.h>
 
-
 /* There are 3 types of slices: */
 #define SLICE_TYPE_TOP 1    /* Meaning slice is at the very top. */
 #define SLICE_TYPE_MIDDLE 2 /* Meaning slice is neither at the top or bottom. */
